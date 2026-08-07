@@ -2,7 +2,7 @@
 
 3DS Link crée un pont local entre une Nintendo 3DS et un iPhone, directement par Wi‑Fi.
 
-## v0.2
+## v0.3
 
 La connexion de base de la v0.1 est maintenant transformée en outil réellement utilisable.
 
@@ -19,14 +19,15 @@ La connexion de base de la v0.1 est maintenant transformée en outil réellement
 - limite actuelle d’upload : 64 Mo ;
 - clavier iPhone → écran de la 3DS ;
 - télécommande expérimentale de l’application 3DS Link ;
+- QR code de connexion généré directement par la 3DS ;
 - journal d’activité sur l’écran inférieur.
 
 ## Utilisation
 
 1. Mets l’iPhone et la 3DS sur le même Wi‑Fi.
 2. Lance `3DS-Link.3dsx`.
-3. Ouvre dans Safari l’adresse affichée, par exemple `http://192.168.1.25:8080`.
-4. Entre le code PIN à 4 chiffres affiché sur la console.
+3. Scanne le QR code de l’écran supérieur avec l’appareil photo de l’iPhone (ou saisis l’adresse affichée).
+4. Safari ouvre directement 3DS Link ; entre ensuite le code PIN à 4 chiffres affiché sur la console.
 5. Utilise les onglets Fichiers, Clavier ou Remote.
 
 ## Commandes 3DS
@@ -42,7 +43,6 @@ La connexion de base de la v0.1 est maintenant transformée en outil réellement
 ## Prochaines étapes
 
 - serveur réseau dans un thread séparé pour garder l’interface fluide pendant les transferts ;
-- QR code de connexion ;
 - explorateur SD avec dossiers ;
 - déplacement/copie de fichiers ;
 - aperçu d’images ;
@@ -50,3 +50,12 @@ La connexion de base de la v0.1 est maintenant transformée en outil réellement
 - presse-papiers ;
 - favoris et raccourcis ;
 - version CIA avec icône et bannière dédiées.
+
+
+## QR code
+
+La v0.3 utilise la bibliothèque **QR Code generator** de Project Nayuki (licence MIT) pour produire un vrai QR code standard et scannable à partir de l’adresse locale de la 3DS.
+
+## Automatisation GitHub
+
+Le numéro de version est stocké dans `VERSION`. Le workflow de compilation lit ce fichier pour nommer automatiquement l’artifact. Le workflow de mise à jour peut ensuite déclencher `build.yml` via `workflow_dispatch`, ce qui évite de lancer manuellement deux workflows.

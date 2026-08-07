@@ -1,5 +1,6 @@
 #include <3ds.h>
 #include <citro2d.h>
+#include "qrcodegen.h"
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -29,6 +30,8 @@ constexpr int PORT = 8080;
 constexpr size_t MAX_HEADER = 16384;
 constexpr size_t IO_CHUNK = 16 * 1024;
 constexpr long long MAX_UPLOAD = 64LL * 1024LL * 1024LL;
+constexpr int QR_MAX_VERSION = 5;
+constexpr int QR_QUIET_ZONE = 4;
 
 constexpr const char* APP_DIR = "sdmc:/3ds/3DS-Link";
 constexpr const char* INBOX_DIR = "sdmc:/3ds/3DS-Link/inbox";
@@ -39,6 +42,7 @@ constexpr u32 COLOR_BLUE        = C2D_Color32(69, 158, 214, 255);
 constexpr u32 COLOR_BLUE_DARK   = C2D_Color32(29, 109, 169, 255);
 constexpr u32 COLOR_BLUE_LIGHT  = C2D_Color32(126, 201, 238, 255);
 constexpr u32 COLOR_TEXT        = C2D_Color32(43, 57, 67, 255);
+constexpr u32 COLOR_QR_BLACK    = C2D_Color32(0, 0, 0, 255);
 constexpr u32 COLOR_MUTED       = C2D_Color32(105, 119, 129, 255);
 constexpr u32 COLOR_WHITE       = C2D_Color32(255, 255, 255, 255);
 constexpr u32 COLOR_GREEN       = C2D_Color32(57, 176, 103, 255);
@@ -59,6 +63,9 @@ unsigned int uploadCount = 0;
 unsigned int pinCode = 0000;
 
 std::string localIp = "0.0.0.0";
+bool qrReady = false;
+uint8_t qrTemp[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)];
+uint8_t qrData[qrcodegen_BUFFER_LEN_FOR_VERSION(QR_MAX_VERSION)];
 std::string lastClient = "Aucun iPhone connecte";
 std::string statusMessage = "Initialisation du reseau...";
 std::string lastAction = "En attente d'une action iPhone";
@@ -73,6 +80,59 @@ struct FileEntry {
     std::string name;
     long long size = 0;
 };
+
+std::string connectionUrl() {
+    return "http://" + localIp + ":" + std::to_string(PORT);
+}
+
+void generateConnectionQr() {
+    const std::string url = connectionUrl();
+    qrReady = qrcodegen_encodeText(
+        url.c_str(),
+        qrTemp,
+        qrData,
+        qrcodegen_Ecc_MEDIUM,
+        qrcodegen_VERSION_MIN,
+        QR_MAX_VERSION,
+        qrcodegen_Mask_AUTO,
+        false
+    );
+}
+
+void drawConnectionQr(float centerX, float centerY, float maxSize) {
+    if (!qrReady) return;
+
+    const int qrSize = qrcodegen_getSize(qrData);
+    if (qrSize <= 0) return;
+
+    const int fullModules = qrSize + QR_QUIET_ZONE * 2;
+    int module = static_cast<int>(maxSize / static_cast<float>(fullModules));
+    if (module < 1) module = 1;
+
+    const float fullSize = static_cast<float>(fullModules * module);
+    const float startX = centerX - fullSize * 0.5f;
+    const float startY = centerY - fullSize * 0.5f;
+
+    C2D_DrawRectSolid(startX, startY, 0.45f, fullSize, fullSize, COLOR_WHITE);
+
+    const float qrX = startX + static_cast<float>(QR_QUIET_ZONE * module);
+    const float qrY = startY + static_cast<float>(QR_QUIET_ZONE * module);
+
+    for (int y = 0; y < qrSize; ++y) {
+        for (int x = 0; x < qrSize; ++x) {
+            if (qrcodegen_getModule(qrData, x, y)) {
+                C2D_DrawRectSolid(
+                    qrX + static_cast<float>(x * module),
+                    qrY + static_cast<float>(y * module),
+                    0.55f,
+                    static_cast<float>(module),
+                    static_cast<float>(module),
+                    COLOR_QR_BLACK
+                );
+            }
+        }
+    }
+}
 
 void drawRoundedRect(float x, float y, float w, float h, float radius, u32 color, float depth = 0.1f) {
     C2D_DrawRectSolid(x + radius, y, depth, w - 2.0f * radius, h, color);
@@ -541,7 +601,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.2</div>
+    <div class="small">v0.3</div>
   </div>
 </header>
 
@@ -605,10 +665,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.2 ajoute l’upload, le téléchargement, la suppression, le clavier distant, la télécommande de test et un code PIN local.</p>
+    <p class="muted">La v0.3 ajoute aussi un QR code de connexion rapide affiché directement sur la 3DS.</p>
   </section>
 
-  <footer>3DS Link v0.2 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.3 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -813,8 +873,11 @@ bool startServer() {
 
     if (hostId == 0) {
         statusMessage = "Connecte la 3DS au Wi-Fi";
+        qrReady = false;
         return false;
     }
+
+    generateConnectionQr();
 
     serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (serverSocket < 0) {
@@ -1085,43 +1148,52 @@ void drawTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.2", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.3", 348, 11, 0.40f, COLOR_WHITE);
 
-    drawRoundedRect(22, 58, 356, 92, 14, COLOR_SHADOW, 0.15f);
-    drawRoundedRect(19, 55, 356, 92, 14, COLOR_WHITE, 0.2f);
+    // QR code : grande zone blanche avec quiet-zone standard.
+    drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
+    drawRoundedRect(9, 51, 164, 174, 14, COLOR_WHITE, 0.2f);
+    drawCenteredText("Scanner avec l'iPhone", 91, 60, 0.37f, COLOR_TEXT);
+
+    if (serverReady && qrReady) {
+        drawConnectionQr(91, 151, 148.0f);
+    } else {
+        drawCenteredText("QR indisponible", 91, 142, 0.42f, COLOR_RED);
+    }
+
+    // Etat du serveur.
+    drawRoundedRect(190, 54, 198, 74, 14, COLOR_SHADOW, 0.15f);
+    drawRoundedRect(187, 51, 198, 74, 14, COLOR_WHITE, 0.2f);
 
     C2D_DrawCircleSolid(
-        48,
-        80,
+        210,
+        77,
         0.5f,
         8,
         serverReady ? COLOR_GREEN : COLOR_RED
     );
 
     drawText(
-        serverReady ? "Serveur local actif" : "Serveur indisponible",
-        66,
-        68,
-        0.55f,
+        serverReady ? "Serveur actif" : "Serveur indisponible",
+        228,
+        65,
+        0.47f,
         COLOR_TEXT
     );
+    drawText(statusMessage.substr(0, 25), 202, 96, 0.32f, COLOR_MUTED);
 
-    drawText(statusMessage.substr(0, 42), 36, 101, 0.39f, COLOR_MUTED);
+    // URL et code PIN.
+    drawRoundedRect(190, 142, 198, 86, 14, COLOR_SHADOW, 0.15f);
+    drawRoundedRect(187, 139, 198, 86, 14, COLOR_WHITE, 0.2f);
+    drawText("Adresse locale", 201, 151, 0.38f, COLOR_MUTED);
 
     if (serverReady) {
-        drawRoundedRect(32, 163, 336, 29, 10, COLOR_BLUE, 0.25f);
-        drawCenteredText(
-            "http://" + localIp + ":" + std::to_string(PORT),
-            200,
-            168,
-            0.45f,
-            COLOR_WHITE
-        );
-
-        drawText("Code PIN", 108, 207, 0.42f, COLOR_MUTED);
-        drawText(std::to_string(pinCode), 211, 199, 0.76f, COLOR_BLUE_DARK);
+        drawText("http://" + localIp, 201, 174, 0.36f, COLOR_BLUE_DARK);
+        drawText(":" + std::to_string(PORT), 201, 193, 0.36f, COLOR_BLUE_DARK);
+        drawText("PIN", 292, 193, 0.34f, COLOR_MUTED);
+        drawText(std::to_string(pinCode), 320, 188, 0.53f, COLOR_ORANGE);
     } else {
-        drawCenteredText("A : reessayer la connexion", 200, 185, 0.48f, COLOR_BLUE_DARK);
+        drawText("A : reessayer", 201, 181, 0.39f, COLOR_BLUE_DARK);
     }
 }
 
