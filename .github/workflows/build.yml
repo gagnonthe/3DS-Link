@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -15,7 +18,20 @@ jobs:
 
     steps:
       - name: Recuperer le depot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Lire la version
+        id: version
+        shell: bash
+        run: |
+          if [ -f VERSION ]; then
+            VERSION="$(tr -d '\r\n ' < VERSION)"
+          else
+            VERSION="0.2"
+          fi
+          test -n "$VERSION"
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Compilation de 3DS Link v$VERSION"
 
       - name: Compiler 3DS Link
         run: make -j2
@@ -23,7 +39,8 @@ jobs:
       - name: Publier les fichiers compiles
         uses: actions/upload-artifact@v4
         with:
-          name: 3DS-Link-v0.1
+          name: 3DS-Link-v${{ steps.version.outputs.value }}
+          if-no-files-found: error
           path: |
             3DS-Link.3dsx
             3DS-Link.smdh
