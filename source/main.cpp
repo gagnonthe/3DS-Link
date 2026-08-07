@@ -1601,8 +1601,6 @@ void drawCameraTopScreen() {
     // l'apercu video continu sera la prochaine couche d'optimisation.
     C2D_DrawRectSolid(18, 44, 0.20f, 364, 154, C2D_Color32(39, 45, 49, 255));
     C2D_DrawRectSolid(20, 46, 0.25f, 360, 150, C2D_Color32(25, 30, 33, 255));
-    C2D_DrawRectSolid(18, 44, 364, 154, C2D_Color32(39, 45, 49, 255));
-    C2D_DrawRectSolid(20, 46, 360, 150, C2D_Color32(25, 30, 33, 255));
     C2D_DrawLine(200, 91, COLOR_MUTED, 200, 149, COLOR_MUTED, 1.0f, 0.4f);
     C2D_DrawLine(171, 120, COLOR_MUTED, 229, 120, COLOR_MUTED, 1.0f, 0.4f);
     C2D_DrawCircleSolid(200, 120, 0.45f, 5, COLOR_BLUE);
