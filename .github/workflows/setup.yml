@@ -1,0 +1,117 @@
+name: Initialiser 3DS Link
+
+on:
+  push:
+    paths:
+      - ".github/workflows/setup.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Creer le projet
+        shell: bash
+        run: |
+          cat > /tmp/3ds-link.tar.gz.b64 <<'PAYLOAD'
+          H4sIAOwXdmoC/+08y3LjSHJ9Nb6iht3TQ6r5At+iHjMUSXXTLbVkktru9c4GBwQKIlYggMFDj+1px/rik8MO2xu+2jdv72FPe/DBN/3J/ID9Cc6swqMAUmrN
+          7EzHxg7R0SJQVZmVlZWZlZWVQLlSrnxxqly/oIpG3Uc/ylXl112/1Wq9kdxjuVytybVH5PrRR7gCz1dc6P7RT/OqdcjSN5Z0T253WnKtUe1Uyw2502zWatKj
+          zfUXf3l24Kq0slQMq6w6zo+m/60G03G53ayGv3Ko83W53ZAfyc1avdmQ640W6n+9KVcfkerH1H9bMe5tB/Uzb6G4VPuLmv/HhqWagUbJbl3zyot9KSlQDd+1
+          axoWCqWK6ygVw6J+ujF1XctOF+mq5ZvpoqVimraaLgNUiA5wpsu9G6/i2epFtqfAMjw/S5UKRYa9nykxjXmmyDWs81QnYYn0WKM6kEEmJ/1Z72j0/BVhV/Va
+          BhFN1R6cHR4Ox5PR3w7DWqiXLGVJPUdRKXkrSapteT69dlxiWD45PRlPyR7pgGXdEeuCeo30T45OxrOD57PpySnvcI/0a4NZ3zZtt17L1+qNIqk1ZPzTgj/N
+          ZmHnLhQHJ9PpyfEqCg7dxD+de1EcnQ0JWUdFa7tI5CYCy40PYZgNeuOXKxjqVcAgAyFyW/4gBuD+i2kWg1zD/qs1+FO/dxjT4Zvp+mEgD3AUrXvhj8+mw8Fa
+          eLnahgHUcCg4nrtRvH4xmg7XogAYBpj8uQPF8/Fw+Gr9ZNSQiyAMcvVeDON4FCtEIBfbdfi/fR+CyYve4OT1WhKg4w5wYBvwNBBcAqgtAsp6EOg6daG5FZim
+          47s7EmqAR91L6k6YLkNdSebFqmlQy08Vz23bRDwTsMk+1aBUV0yPRhUMzxg81ZtMTYiKUiupCCzPOLcACfbl0q8D6vl9O7CwL9REsA/dLtd/AkZJMUcO1OSq
+          ZfYvt5NuoAAw6wTb9AI1sIhxurDBJgDvLKr6NAMBy4ofeMfU85RzikAjy/ANxTQ8xTdsi2gBEOVRJSiXywAq9euD2Zha4IRPFfec+lvEtx1+K/Jztdnc9n17
+          uaYlzNiUXvswJ8Tnv5m5kS5tQyOaq1yNgS8a1cYwjrxu2opProuE39xEN1fRzSK6cRXNCLwikxkVZSOq0KjjL5DNZVkvgEVEEUJyBtgV9DGxTUPLX5NnMQro
+          hQEVyRUpkVq5qpOtuBJKGXqQtDswAQIBWYQJIFeRrcPUN1zVpGuoWkX6XdDgUH4gVCKahYD2B6DqAejeCaKCIpVn9oII4v6UXCpmQCMBWJUeDxSMCqIiigWi
+          ZCK6kyo6VVyP5p9iRVGQ4CLvqqzOoOt8oZAGOnFgN2P8OoTLsILRHiLEsteGv+hzwb1mMlgtd/RiRGv4s44JfTAEFFzBBzFDZY3f/PmwhNWGSm1ooaZW9R2h
+          fEGN84WfqojQPaf+ADaMYF1h3BEtaZY9ZWjhl6OJukxNgxQtThxD/Jiel7g4ZCLIKie5wvQ6qb9Jbtkkxk+cpLseGePZE5/hcJ2xtJ5p5tnaBcsTygBOsQru
+          /xbRFF+BkQJDZz4xqXXuL6KZCws9Gi8yWHq1MExK8qx0NwPBaWDyEwLDohCYCI5U5Hn32CVoKmIohgiAEfyxGs42XoZO8iH8LvRfAGR+4FrRihjzACl5tseW
+          KEOdqbC27fLe90PwEOc7PoAQi+8GlDFJXOaWygV9TeensMjlo0GF7ce5F9Pjo/zuJ5qt+jcOJQt/ae5Lu/gDC6p1vpfT3RwWwIoOP0sKo0Qee9TfywW+Xurk
+          omL0r/dylwa9cmzXzyHPfBjFXo5Jw55GLw2VlrjYGXyhLbGp3pOLEVRJN/w91QYXAtH6hm/S/fpgQo4M62K3wp8l2BHc4G/XtW3/LRMPQLSgS9o1UZZ3dOi5
+          pCtLw7zplhTHMWkJdio+XRYPTEB0rKgT9ngI7Yq5ySE5dW0yMDzHVG5yxZ4LlBU9xfJK4M0Y+jtp6+3cvi4B+4Gb3bntwspegpJ3IIrazdslLOuG1a3uzBX1
+          4tzFZbr7mFK9oXd2GHHdx7VWvVGnO0vDKnF168Km5HLxTlqwkN5bARIIpIpbOkf7DtzLy52qRs+Lj9u6uk214uNGE35ahQizrus7jqJpSFmt4VyD/x3+2YkJ
+          Rd+jK0OxhwsMeVyrtzSl+U4qX7mKA+Rf80npthlYOBwl8G2gT06Gx7iKMtitYzuT+qDtJdxRYeelctMBjpS9YP7WxjL/plveDrGVwE/qNng987kirHIHyJKR
+          7jT7cFicfpFwtanVNTUaGF8Bu3ILiIlYwB7YZC0Uzb7qVkkj6uBxQ29pnWqtCkRoIDcan++uYSHLS3PwLy92OCNk6HMnmig5YWXYY7P6aYrYOp1XW/FQXQbW
+          ydKB/xgZvHWtBmScu4YW04EPO/inBJIJJT4twRwHSwuGqLsE/u+cK05XronD5TxVFVd7+4OwD8kWpTQUpHv4KbeBAAN0/W1aPt6VmbYKpQw5e7zi2NvVqigf
+          HQTy7BQmuQ4woai35U69o69IlA5GAFQIV6gSuO7nVpevQxkwkWWEiR2T4nRXMJS5op3T9cKR0u+W3tS1WL+ZRq1h+byjUb2WYfn29rbA8ybSU82wplUFMd2t
+          hIZutxKaX7Q3oTGm7v6uZlzCtkrxPLCxoMq5/d2FLJhLeBCbgGbm9n9m+y6NtkWw24KFwDRu35Pb/ySXrOqVgVZbswngKe9WAH4/+ht2K632myriGg7EgGmw
+          okLQOCipYNE+RnRs65xRGu7Mbt9THC0r3p27aViUidx+H1te47aM7QQpUVTfuKQRTkZjig7UpQxpqCi5FFNQcnP7//cf//b34SiFOibAuf1DQ10Y1PVWG3DC
+          pi4sFeDh+RFbv/2H3yL3yLe/+S2ZoxG//aMvcvKBJP37//zvf//znVRBV759J01DC/xgohku8JbAaurBYk7OgWuuQf80ur79x9/dR1bfVGAtd+/kFWgpTfj0
+          rz8En/7pD3dSM6ZLMA53EnP73rx9r9rLpQI76w+QEv5wa5OWT2YycrHikUvYU0di6ew/B8Ip+MawWhIH4wx2ABOCD6BmCnh5Xwe8bwYLRkDF2INFQfkc6D3s
+          MCagEtqACvPUCui+5ZKNj2raHuVBkNjVQ48zFcfZZ36n4NwiUKqJ4K+uiQBxtzPq0gNLPGFRn7jHFBWhh41UpIJM66kQmxREd3glPCU4vwx3HJESkULp8Npg
+          VAhFK6GrVVx80yai0l1KhZoUwtW4jYBxbUgs3scgKRn2iRwNubcueMbd+GzMDEsfFgnjXX23CFh2vOL2BAOM+/klXbJVOB9H6YuZkHy090VOf7KW1StUDV2X
+          Bi4B3DaYtJCkXDIFq3uokPd83zbm+y3oaxzv3GwVh5pM6AqVCZHj2WFvdDQc5GMEhZTgwnaIzBmSX7QavxQEg+3BLAc2Yb6ebKbx4s2LqTL0Qmw9z6sK6bpc
+          SG+XVK8/rXbMN7kMrDgPUVDVxNVUIDqGEIU3w2reezjT30/s752QlPbx3aowURhnWdieP8Lac+rjvaFF2mtYM/CZXIJ/gOC373hx+Fj2eO1eiCFUhThqjAdY
+          M8u3lXwIIFqmqNOMTVoRxH6oPricos1WAvLaKB0aD5HFjA3j52b53uFs9Go4ZeL3cjaZjoe94yIZnZ6OT6Yns9GpIIcpBLv3Uyrs//M53lWX5AoYoQAvz3Vt
+          N8+OAwsPIBxjLDfUA6yh2YXNP6K0HT9FE47haIbj4OOZjYdnk2FvMBgXyVNAUIxEHO4LhcSaXOCEzAwr5FA0r/yp7MG08708EBBya6UBxg5w5n2Md+FpXmGl
+          CXayKiMxc+cGhnJSo3Ep+sKuA4wJAzAhrWDmnvKmhXhM4XOBfLL3HWYGe/3e88J1BmdHN5VznB92nJsZxeHs+XB6eJREodY3mvBGHNM35GT26uTVwRHMpagm
+          sC7A5iAD2/yOY+ZIvveo08spNyFrdZUtobBq4PyRErpdsHRMFF1xI3XNBs2YP+PYpplZkPlKJfT7zTdkVRk5tjVizRfvWKyhxqTWLDpcO+Kxwr1IkHhpZuGP
+          jIaiqtQRArOpmRB4d4/ghviT1k9FOqI463rPMWN0sJ7NGwrAsPe8N3pFnj4lSdHrk7OjAZciAeyDEsJH+SEJeZeRlQfphjicO3Uj2yilG0/J360qB/MBQmfs
+          F3K11vxlNN2wA7vMIAzb4fFwrcH7XnXyEsF+9kz08tZ4eMnKxjHE5q5wh2ZkfEHySS61CouxY4eDpELI4ph5TOAXtWYrdHwSxvOqRLzXe0O8lRD851rAiwUp
+          zb2YTk8rclkmtWqVnLz80v3SyiW1fR5sLk1vHNplxy5sg7QTB6tZrPoOIE5jl3waZBso6oKWsJlrm11i2SXwzV26igb5CP5yl+9isJ61KUr3OmjAif08criM
+          o84XCival+LhfsbIhkcgaeEK+bn24EDEVkjtrtZhYoSFx1XhU0hmWtPSm73UOSTsY1TwH6186tyMHYP3Taq4+fj8vJjKsxFOxyYqtegBPTespHH2sCo5Za6C
+          OhXZmXaRNKpw26gXhbyVO0+nI7haBJcC4+ku9wE3ailouZhNt4lIjo9nc9GWPwfNW0XSQQRtxCAkqIRdJkAYWgCAOqYJYa5OtdyoroDEMGLKAObmtOoI2kDD
+          g38axVQaCeNbUxf6TME3Ab66Hp51zBmQnRrxZDuWt2YjUYxOSzwVbAqngtvFzDLH197PU+k33SSVJqU82soZZhpH7B2wDQKLJeo5wBaXg2NmeI5tGXOTCnrc
+          bqy/B9LbAu1JntN6qlImmYuPXGUi0KjH88nSnFbjJ2wIoiFYOe1Obx1PBMeHeDA0cJLDcEBmFwmWNV0gdzIFQJ84zGSojFZxg5miThSkZj1KEtvGTDUU5Kqo
+          LsiEup7FcM/4Fr7vdCuVHPgK0W7vGcl1c8x3gDXHt2ehY8E2Bh8Ycq3aXhlya+2QmdRn99TvCAWH9eGT0wOZAwsJcnADO2nYVapRmPuDc7O9SmhnLaGxEVoh
+          NmWtD9hB4QcMtpjJVMwmNq432yLIwyx3vcYMzRrLnVjCfsInImOiHAI3Ow8zhgjQ2A5FsN3ElMHvYgtRYDHXs462Pg2+xhSumiLB0fs89sY06rPAHBqhoUUU
+          H10TLCbmZyvaCtY4saadlBkSTWiqo3Vm824LtQZHSrQ+J/lcj8VRKFKMyhf7pIVUy25kgszPlBBA0XUDPCtKgLCFEvjlO4bWaYtDq2+vWNjE7Nw51SwXFLNC
+          WW5pk6+b6yYrLV+9HGbjIhiTrJasr1vT0zBjaiqWSt1c2FGDW/TtGBTZvQJlUr42BTFcm2lCvbF+JVgZIeZ6fp8hTqa98RTVp91OiK09YJx/Exh49o8cqrcf
+          PE7B4eFgHx5mWhKBv7AP8qkXLWZc7jJGXtwsCcYeVD4RMeCPKFfN++UqitVj0spzV3EWhurFBvJcv8bA7IDqSmCmjzs+wURQFmXGm8HwsHd2NJ31jwcHZ7Cn
+          ZJHwTJhDAK1FoLUE9Lj3ZnZy8NfD/nSSikAj+kOgLv+Q+AkiPHWpo7jJVk5MY2VZxC5VfMqXAl6Rf374Bj3zIsGbo+FhNL+Z1NZ7oPkasYIglfcqJMS+olf5
+          RnW7FdEYBWtiUp8+TXcOzwmuZCPiLQJfs6+slZlDPicAKX4mVAyoCRIntktYvD5jN8NqcV6y8wSyE51OAcQ7UqmQ+CUFieVf4zs/6TBUWghjAZKjuJN4npRO
+          blMc/xjQHdm2k0+Jz8LQJqpijSwnSJ2UJTF55B8GTQ3tJb3xBvCUFx00JIw1eUpeDn8+Y3alQOYgBhc7dzXqFdbSipcYgROKGfdc4A93K9jjuHc8nE1+/qo/
+          GPdeC6Rndp/pirSjs7PawdACfyTVdSIQ4b41Kw9RcDJ1dMdKVsQvFXus4tR/4P2f8ub9z837n6vvf27Xtlub9z9/AtexckF1MOE/Zh/3v/9ZbYKzlnn/s1aT
+          m5v3Pz/GVZ6cHR6O3gwnXXAKdPo1yT/Jo7PrkCf5wfBnL0ew3h4XCsWC9CTPjkpILi4m1meY5ecoHmHvRxplMoJVXTFN3FpeXhj+qWtX+B00zxUkammGLkng
+          6w1GY/L5HnTSPxvDfUGKXskUu63UNW/mBib1AKY3fj4M3+zr7uEBeQkdfungbHQUvenWxRwDw9SkycnZuD+cRIX8JWdp0Jv2SNIUs+ql0av+0dmAN+3icQej
+          Qno+7p2+GPWjYnCmJHAt4766SDl7KkhS7/R0Nh1Nj4ZEpI5tR1gdYO+PR6fT0ckrrFvJNYwSJv1UfiQD7Z1NX5yMY7TnyrllW/4CHLjeuP8Ci0pLxVUXe4q7
+          vGxdwJMfWHRv6ag27IlLS/YyR0mZG3sguRpWO3uerfuS1D886j2fMAznpPQa5oyUTmrQ4sp2tZJLkTY8dfDIl8KGu6TrAc8hK3n8VCJd/ySPdBVi9M+QTyGL
+          C6Q0mM1gZLMZ1L95ExMAMsDuoYFu2SXX9w1+R6/xqI51UoKN2N65FTx7Jrdh8BOR+qjTo0FS6jlU9fZAfK7L7FZoB6M1i6VjxSk+yVu2rxkuebJVXioOkH00
+          OuDwZvjyc3RXZ3e+G8DPEpuBzEbET8dnUFBA/bG4AnHJEPBHUl6AVvSaJRScnE1Pz6YhCl5beZLnUl6IGoWKIjaKEfzstDd9wat0mG1FXWBOJnQaCj/2nyCG
+          KvDLv0wFT/iMpYEjwf9+0KhhayBjmgfD00l2QJVEk/qHoyOmivePKubqFeg65m4S3k9lq6wii/unpxzR90fjOIho8ifT4yEasBx30iPy+x48fp1hOhi9uhNT
+          xPt7sGwxAcya+YhdzMqHEwVmjs9RH4pgl79S/uZNbM0jfJGBRCL4TSLHdZEDET+6OKw9+HMd44qUg9XPIjPOuwzJ7OLs7JXtAjMcYUn4PAmfPXzOIAPecUSK
+          pnmwvTKuSdlGUkOeFgqrdRHdhQwyjihBXEieIrmIAF4IAAL2BWD3gjksn+XiLEVFYZVDi0SDQmO6TgCipaxQLI0eoryr6hvaNY6AyUy4Hq4HT3cTKXEkKaMD
+          NFBrRTXp5yjsxzTmMcdwjXiDliLkMjOUhbK31BapJvESUyph3d4aO8qBpPLpi5NXP+8SXOVU2GNbkgS33WQN/6svnuSPey9xjSrBwsPyCEo8w912b0ipHzeF
+          lUkwXZH3LElRfRdwLS9QAUugW19IEusPS6m6sHnvpFwuQ4G7BGRugjmhGtctkh6E8EhNVBRUSinhDoJ0BW5BI3iKWVlgbdMSis25dBZETADZjcUZaj4tzw2r
+          bJNPZ/iLmQxYEA0osTe7nI1QVwPdk0qiQ8esPlogTQo1fbPz+jPx/zfxn038ZyX+s12rtxsbHf0p6P+54Ruwq3R/xAjQB+I/1erK979qzfom/vNRLhYvqUhb
+          zKvYYm4E/DC3iW2KN0Zgs/5v1v+fzvpfa2yXa/UWTMlm/f8pXONhb3A8LC9/zFXtA+s/iFsjXv/bdRnX/2q9vVn/P8b1ODmrkOIXxfFUJ7DIwl7SuUuvUucS
+          mLlx+18BcezAJap7+5662NaxLT/Md6YWfushsPib55Sh4mccZUl6/Ji9ws5ehk9OQjRK5goGNPr8VXaXLo3b3wEW/LwANvDwEwj4HQnFNDSezKrblsZfJAYi
+          8J1d0pWkUpTuRvCVjpAgHsihS3yjBXOUw/crd6B1lDQ4Og3zBmE8vM1nt+9VV4GeA+f2vWsgSgRgLz/p+KHPPjshGPDWFI/AgmvCgTzWlL3esrTnmCCj3b7X
+          DMSNrx95HiZ+48fWAiPON0MIaOXzYxWifRZEb9EwDoWHRNhKtZeOj/RolL3uc/t7TFvDGpfnCOKb1REblEuqkq96X3HWT2FmJUkuk2Pqe3HuJ85RyBM+GLK8
+          /f2Sxnx9bXz7m385NMpSrUyOWAdfRcdvzGH8KhrKi0hgjpTAUhfULUt1APkMP5Nk8POkKD2TyUfEfaCXfSDqqzDdGvafZbnVKcvlWrOLH04F8htlMlWgDb1W
+          ornk3z2IkSDfOTPLUhMp5TOwtRXJ9dYW0WzDJ0CO4iq3f0AxTYbOqzh1LvkqnTkb8q8ffs/BYyd0wHHgLEuy5rmZJEm3jJiHbVjOErb7muc2MlQTuEdJv31/
+          GVBE5cef+oB51cPvgoif/ZgM2CRT/vkNgGVf6eAiwb+Mkf34BVb56Q9RYNFrOg/fuWNKjMILLRaKdQ53+IEgD6mnZiSTavRVCfxu0xKmEb8qoVFRjxK18PF1
+          B+CDYwYeSB/wBcUe20S63B/1uFga6u0fufTNFcviCh8piscZfgBWAUhSFxZ2imyKj5NJhZjGHM/koDRSxgq/qw/QErAxeuRggk+JPdj4NRv/f+P/3x//Awet
+          s9GTn0j8bxHMK1e2e6Gb9pVXYRGh8s3S/Fj+v1yttzLxv2a7LW/8/49xYU54F/0aBxZtV9gM2FZXIsQJvEWX5+KDewKekdcND4JLLH8cHiLJmeE7jYqvQnvp
+          V/acNWSyxCHcwPJK+BZzMA8sPyjhRwjBGQ1zwX3ARd0It7EEx60bLvVOnEOmuMtuCBYmRFNHoIcPZUzVwKEud8bAL7X9+OQ68IB89jqmbXkVGIx6YQf+F5cN
+          KYNjlR3xmw8BjABfWCelX9WyYKfB3DQod6hiB07luLw7qAgc01a0kuL6BrhPjJio4RVoZlc4duedRJ53CbdRQi2wftEl36SO6VNe+voaFuldW4MB4Y193Fyb
+          a3Ntrs21uTbX5tpcm2tzba7Ntbn+Eq7/Bw/bOTIAeAAA
+          PAYLOAD
+
+          base64 -d /tmp/3ds-link.tar.gz.b64 > /tmp/3ds-link.tar.gz
+          tar -xzf /tmp/3ds-link.tar.gz -C "$GITHUB_WORKSPACE"
+
+      - name: Enregistrer les fichiers
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add source/main.cpp Makefile .gitignore README.md .github/workflows/build.yml
+
+          if git diff --cached --quiet; then
+            echo "Projet deja initialise."
+            exit 0
+          fi
+
+          git commit -m "Initialiser 3DS Link v0.1"
+          git push
