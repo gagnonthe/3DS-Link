@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,11 @@ constexpr int QR_QUIET_ZONE = 4;
 
 constexpr const char* APP_DIR = "sdmc:/3ds/3DS-Link";
 constexpr const char* INBOX_DIR = "sdmc:/3ds/3DS-Link/inbox";
+constexpr const char* CAMERA_DIR = "sdmc:/3ds/3DS-Link/camera";
+constexpr int CAMERA_WIDTH = 400;
+constexpr int CAMERA_HEIGHT = 240;
+constexpr size_t CAMERA_FRAME_BYTES = CAMERA_WIDTH * CAMERA_HEIGHT * 2;
+constexpr u64 CAMERA_WAIT_TIMEOUT = 1000000000ULL;
 
 constexpr u32 COLOR_BG_TOP      = C2D_Color32(233, 240, 245, 255);
 constexpr u32 COLOR_BG_BOTTOM   = C2D_Color32(240, 244, 247, 255);
@@ -42,7 +48,6 @@ constexpr u32 COLOR_BLUE        = C2D_Color32(69, 158, 214, 255);
 constexpr u32 COLOR_BLUE_DARK   = C2D_Color32(29, 109, 169, 255);
 constexpr u32 COLOR_BLUE_LIGHT  = C2D_Color32(126, 201, 238, 255);
 constexpr u32 COLOR_TEXT        = C2D_Color32(43, 57, 67, 255);
-constexpr u32 COLOR_QR_BLACK    = C2D_Color32(0, 0, 0, 255);
 constexpr u32 COLOR_MUTED       = C2D_Color32(105, 119, 129, 255);
 constexpr u32 COLOR_WHITE       = C2D_Color32(255, 255, 255, 255);
 constexpr u32 COLOR_GREEN       = C2D_Color32(57, 176, 103, 255);
@@ -71,6 +76,11 @@ std::string statusMessage = "Initialisation du reseau...";
 std::string lastAction = "En attente d'une action iPhone";
 std::string lastText = "";
 std::string lastRemote = "-";
+bool cameraMode = false;
+bool cameraCaptureRequested = false;
+unsigned int cameraPhotoCount = 0;
+std::string lastPhotoName = "";
+std::string cameraStatus = "Pret a prendre une photo";
 
 C3D_RenderTarget* topTarget = nullptr;
 C3D_RenderTarget* bottomTarget = nullptr;
@@ -127,7 +137,7 @@ void drawConnectionQr(float centerX, float centerY, float maxSize) {
                     0.55f,
                     static_cast<float>(module),
                     static_cast<float>(module),
-                    COLOR_QR_BLACK
+                    COLOR_TEXT
                 );
             }
         }
@@ -221,6 +231,7 @@ void closeClient() {
 void ensureDirectories() {
     mkdir(APP_DIR, 0777);
     mkdir(INBOX_DIR, 0777);
+    mkdir(CAMERA_DIR, 0777);
 }
 
 std::string urlDecode(const std::string& input) {
@@ -302,6 +313,195 @@ std::string jsonEscape(const std::string& input) {
     }
 
     return output;
+}
+
+void writeLe16(FILE* f, unsigned int value) {
+    fputc(value & 0xFF, f);
+    fputc((value >> 8) & 0xFF, f);
+}
+
+void writeLe32(FILE* f, unsigned int value) {
+    fputc(value & 0xFF, f);
+    fputc((value >> 8) & 0xFF, f);
+    fputc((value >> 16) & 0xFF, f);
+    fputc((value >> 24) & 0xFF, f);
+}
+
+bool saveCameraBmp(const std::string& path, const u8* rgb565) {
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+
+    const unsigned int rowBytes = CAMERA_WIDTH * 3;
+    const unsigned int padding = (4 - (rowBytes % 4)) % 4;
+    const unsigned int stride = rowBytes + padding;
+    const unsigned int pixelBytes = stride * CAMERA_HEIGHT;
+    const unsigned int fileBytes = 54 + pixelBytes;
+
+    writeLe16(f, 0x4D42);
+    writeLe32(f, fileBytes);
+    writeLe16(f, 0);
+    writeLe16(f, 0);
+    writeLe32(f, 54);
+
+    writeLe32(f, 40);
+    writeLe32(f, CAMERA_WIDTH);
+    writeLe32(f, CAMERA_HEIGHT);
+    writeLe16(f, 1);
+    writeLe16(f, 24);
+    writeLe32(f, 0);
+    writeLe32(f, pixelBytes);
+    writeLe32(f, 2835);
+    writeLe32(f, 2835);
+    writeLe32(f, 0);
+    writeLe32(f, 0);
+
+    const u16* pixels = reinterpret_cast<const u16*>(rgb565);
+    const u8 zeroes[3] = {0, 0, 0};
+
+    for (int y = CAMERA_HEIGHT - 1; y >= 0; --y) {
+        for (int x = 0; x < CAMERA_WIDTH; ++x) {
+            const u16 data = pixels[y * CAMERA_WIDTH + x];
+            const u8 b = static_cast<u8>(((data >> 11) & 0x1F) << 3);
+            const u8 g = static_cast<u8>(((data >> 5) & 0x3F) << 2);
+            const u8 r = static_cast<u8>((data & 0x1F) << 3);
+            fputc(b, f);
+            fputc(g, f);
+            fputc(r, f);
+        }
+        if (padding) fwrite(zeroes, 1, padding, f);
+    }
+
+    const bool ok = !ferror(f);
+    fclose(f);
+    return ok;
+}
+
+std::string makeCameraFilename() {
+    const unsigned long long stamp = static_cast<unsigned long long>(osGetTime());
+    char name[64];
+    std::snprintf(
+        name,
+        sizeof(name),
+        "CAM_%010llu_%03u.bmp",
+        stamp,
+        cameraPhotoCount % 1000
+    );
+    return name;
+}
+
+bool captureCameraPhoto() {
+    ensureDirectories();
+    cameraStatus = "Initialisation de la camera...";
+
+    std::vector<u8> frame(CAMERA_FRAME_BYTES);
+    if (frame.empty()) {
+        cameraStatus = "Memoire insuffisante";
+        return false;
+    }
+
+    Result result = camInit();
+    if (R_FAILED(result)) {
+        cameraStatus = "Impossible d'initialiser la camera";
+        return false;
+    }
+
+    bool ok = true;
+    Handle receiveEvent = 0;
+    u32 transferBytes = 0;
+
+    if (R_FAILED(CAMU_SetSize(SELECT_OUT1, SIZE_CTR_TOP_LCD, CONTEXT_A))) ok = false;
+    if (ok && R_FAILED(CAMU_SetOutputFormat(SELECT_OUT1, OUTPUT_RGB_565, CONTEXT_A))) ok = false;
+    if (ok) CAMU_SetFrameRate(SELECT_OUT1, FRAME_RATE_30);
+    if (ok) CAMU_SetNoiseFilter(SELECT_OUT1, true);
+    if (ok) CAMU_SetAutoExposure(SELECT_OUT1, true);
+    if (ok) CAMU_SetAutoWhiteBalance(SELECT_OUT1, true);
+    if (ok) CAMU_SetTrimming(PORT_CAM1, false);
+    if (ok && R_FAILED(CAMU_GetMaxBytes(&transferBytes, CAMERA_WIDTH, CAMERA_HEIGHT))) ok = false;
+    if (ok && R_FAILED(CAMU_SetTransferBytes(PORT_CAM1, transferBytes, CAMERA_WIDTH, CAMERA_HEIGHT))) ok = false;
+    if (ok && R_FAILED(CAMU_Activate(SELECT_OUT1))) ok = false;
+
+    if (ok) {
+        CAMU_ClearBuffer(PORT_CAM1);
+        if (R_FAILED(CAMU_StartCapture(PORT_CAM1))) ok = false;
+    }
+
+    if (ok && R_FAILED(CAMU_SetReceiving(
+        &receiveEvent,
+        frame.data(),
+        PORT_CAM1,
+        CAMERA_FRAME_BYTES,
+        static_cast<s16>(transferBytes)
+    ))) {
+        ok = false;
+    }
+
+    if (ok) {
+        cameraStatus = "Capture en cours...";
+        const Result wait = svcWaitSynchronization(receiveEvent, CAMERA_WAIT_TIMEOUT);
+        if (R_FAILED(wait)) ok = false;
+    }
+
+    if (ok) CAMU_PlayShutterSound(SHUTTER_SOUND_TYPE_NORMAL);
+    CAMU_StopCapture(PORT_CAM1);
+    if (receiveEvent) svcCloseHandle(receiveEvent);
+    CAMU_Activate(SELECT_NONE);
+    camExit();
+
+    if (!ok) {
+        cameraStatus = "Echec de la capture";
+        lastAction = "Camera : capture echouee";
+        return false;
+    }
+
+    ++cameraPhotoCount;
+    const std::string name = makeCameraFilename();
+    const std::string path = std::string(CAMERA_DIR) + "/" + name;
+
+    if (!saveCameraBmp(path, frame.data())) {
+        cameraStatus = "Erreur d'ecriture sur la carte SD";
+        lastAction = "Camera : erreur SD";
+        return false;
+    }
+
+    lastPhotoName = name;
+    cameraStatus = "Photo prise - envoyee au site";
+    lastAction = "Camera : " + name;
+    return true;
+}
+
+std::vector<FileEntry> listCameraPhotos() {
+    std::vector<FileEntry> files;
+    DIR* dir = opendir(CAMERA_DIR);
+    if (!dir) return files;
+
+    while (dirent* entry = readdir(dir)) {
+        const std::string name = entry->d_name;
+        if (name == "." || name == "..") continue;
+        const std::string path = std::string(CAMERA_DIR) + "/" + name;
+        struct stat st{};
+        if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+            files.push_back({name, static_cast<long long>(st.st_size)});
+        }
+    }
+    closedir(dir);
+
+    std::sort(files.begin(), files.end(), [](const FileEntry& a, const FileEntry& b) {
+        return a.name > b.name;
+    });
+    return files;
+}
+
+std::string cameraJson() {
+    const auto files = listCameraPhotos();
+    std::string json = "{\"photos\":[";
+    for (size_t i = 0; i < files.size(); ++i) {
+        if (i) json += ",";
+        json += "{\"name\":\"" + jsonEscape(files[i].name) + "\",\"size\":" +
+                std::to_string(files[i].size) + "}";
+    }
+    json += "],\"count\":" + std::to_string(files.size()) +
+            ",\"latest\":\"" + jsonEscape(lastPhotoName) + "\"}";
+    return json;
 }
 
 std::vector<FileEntry> listFiles() {
@@ -572,7 +772,7 @@ button{border:0;border-radius:11px;padding:11px 14px;font-weight:700;background:
 button.secondary{background:#e7eff4;color:#315267;border:1px solid #c9d8e1}
 button.danger{background:#fff0f1;color:#a8373e;border:1px solid #efc6c9}
 button:disabled{opacity:.45}
-.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;padding:0 14px 12px}
+.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;padding:0 14px 12px}
 .tab{background:#e4edf3;color:#45606f;border:1px solid #ccd9e1;padding:9px 5px;font-size:12px}
 .tab.active{background:#fff;color:#236da5;border-color:#9ccae5}
 .panel{display:none;margin:0 14px 14px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:15px;box-shadow:0 4px 14px #4f6d8012}
@@ -601,7 +801,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.3</div>
+    <div class="small">v0.4</div>
   </div>
 </header>
 
@@ -619,6 +819,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
     <button class="tab active" onclick="showTab('files',this)">Fichiers</button>
     <button class="tab" onclick="showTab('text',this)">Clavier</button>
     <button class="tab" onclick="showTab('remote',this)">Remote</button>
+    <button class="tab" onclick="showTab('camera',this);loadCamera(true)">Camera</button>
     <button class="tab" onclick="showTab('info',this)">Infos</button>
   </div>
 
@@ -662,13 +863,24 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
     </div>
   </section>
 
+
+  <section id="camera" class="panel">
+    <h2>Camera Link</h2>
+    <div class="muted">Prends plusieurs photos avec la camera exterieure de la 3DS. Chaque nouvelle photo arrive automatiquement sur cette page.</div>
+    <button style="margin-top:12px;width:100%;font-size:17px;padding:14px" onclick="remoteCapture()">📷 Prendre une photo sur la 3DS</button>
+    <div id="cameraState" class="muted" style="margin-top:9px">Tu peux aussi appuyer sur Y puis A directement sur la console.</div>
+    <div id="cameraPreview" style="margin-top:14px"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px"><strong>Pellicule</strong><button class="secondary" onclick="loadCamera(true)">Actualiser</button></div>
+    <div id="cameraRoll" class="filelist"></div>
+  </section>
+
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.3 ajoute aussi un QR code de connexion rapide affiché directement sur la 3DS.</p>
+    <p class="muted">La v0.4 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.3 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.4 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -801,6 +1013,87 @@ async function remote(key){
   if(r.ok) toast('Commande '+key); else toast('Commande refusée');
 }
 
+
+let latestCameraName='';
+let latestCameraUrl='';
+
+async function fetchCameraBlob(name){
+  const r=await fetch('/camera/file?name='+encodeURIComponent(name),{headers:headers()});
+  if(!r.ok) throw new Error('Photo indisponible');
+  return await r.blob();
+}
+
+async function showCameraPhoto(name){
+  if(!name || name===latestCameraName) return;
+  try{
+    const blob=await fetchCameraBlob(name);
+    if(latestCameraUrl) URL.revokeObjectURL(latestCameraUrl);
+    latestCameraUrl=URL.createObjectURL(blob);
+    latestCameraName=name;
+    $('cameraPreview').innerHTML=`<div style="background:#111;border-radius:14px;padding:8px"><img src="${latestCameraUrl}" style="display:block;width:100%;border-radius:9px" alt="Derniere photo"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="secondary" style="flex:1" onclick='saveCameraPhoto(${JSON.stringify(name)})'>Télécharger</button><button class="danger" onclick='deleteCameraPhoto(${JSON.stringify(name)})'>Supprimer</button></div>`;
+    $('cameraState').textContent='Nouvelle photo reçue automatiquement : '+name;
+  }catch(e){ $('cameraState').textContent=e.message; }
+}
+
+function renderCamera(data, forcePreview=false){
+  const roll=$('cameraRoll');
+  if(!data.photos.length){
+    roll.innerHTML='<div class="muted" style="padding:12px 0">Aucune photo dans cette session.</div>';
+    return;
+  }
+  roll.innerHTML=data.photos.map(p=>`<div class="file"><div><div class="name">${esc(p.name)}</div><div class="size">${formatSize(p.size)}</div></div><div class="actions"><button class="secondary" onclick='showCameraPhoto(${JSON.stringify(p.name)})'>Voir</button><button class="secondary" onclick='saveCameraPhoto(${JSON.stringify(p.name)})'>Télécharger</button></div></div>`).join('');
+  const newest=data.photos[0].name;
+  if(forcePreview || newest!==latestCameraName) showCameraPhoto(newest);
+}
+
+async function loadCamera(force=false){
+  if(!pin) return;
+  try{
+    const r=await fetch('/api/camera',{headers:headers()});
+    if(!r.ok) return;
+    renderCamera(await r.json(),force);
+  }catch(e){}
+}
+
+async function remoteCapture(){
+  if(!pin){toast('Entre le PIN');return}
+  const before=latestCameraName;
+  $('cameraState').textContent='Capture demandée à la 3DS…';
+  const r=await fetch('/api/camera/capture',{method:'POST',headers:headers()});
+  if(!r.ok){toast('Capture refusée');return}
+  for(let i=0;i<14;i++){
+    await new Promise(resolve=>setTimeout(resolve,650));
+    try{
+      const s=await fetch('/api/camera',{headers:headers()});
+      if(!s.ok) continue;
+      const data=await s.json();
+      if(data.photos.length && data.photos[0].name!==before){
+        renderCamera(data,true); toast('Photo reçue sur l’iPhone'); return;
+      }
+    }catch(e){}
+  }
+  $('cameraState').textContent='La capture prend plus de temps que prévu. Appuie sur Actualiser.';
+}
+
+async function saveCameraPhoto(name){
+  try{
+    const blob=await fetchCameraBlob(name);
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  }catch(e){toast(e.message)}
+}
+
+async function deleteCameraPhoto(name){
+  if(!confirm('Supprimer cette photo de la 3DS ?')) return;
+  const r=await fetch('/api/camera/delete?name='+encodeURIComponent(name),{method:'POST',headers:headers()});
+  if(r.ok){ if(name===latestCameraName){latestCameraName='';$('cameraPreview').innerHTML=''} loadCamera(true); toast('Photo supprimée'); }
+}
+
+setInterval(()=>{
+  if($('camera').classList.contains('active')) loadCamera(false);
+},2200);
+
 if(pin) setTimeout(unlock,250);
 </script>
 </body>
@@ -908,6 +1201,41 @@ bool startServer() {
 
     serverReady = true;
     statusMessage = "Serveur pret - ouvre Safari";
+    return true;
+}
+
+bool sendFileFromDirectory(int sock, const char* directory, const std::string& name, const char* contentType) {
+    const std::string safe = sanitizeFilename(name);
+    const std::string path = std::string(directory) + "/" + safe;
+    FILE* file = fopen(path.c_str(), "rb");
+    if (!file) {
+        sendSimple(sock, 404, "Not Found", "Fichier introuvable");
+        return false;
+    }
+    fseek(file, 0, SEEK_END);
+    const long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    if (size < 0) {
+        fclose(file);
+        sendSimple(sock, 500, "Internal Server Error", "Erreur fichier");
+        return false;
+    }
+    char header[512];
+    const int headerLength = std::snprintf(
+        header, sizeof(header),
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        contentType, size
+    );
+    if (headerLength <= 0 || !sendAll(sock, header, static_cast<size_t>(headerLength))) {
+        fclose(file); return false;
+    }
+    std::vector<char> buffer(IO_CHUNK);
+    while (!feof(file)) {
+        const size_t got = fread(buffer.data(), 1, buffer.size(), file);
+        if (!got) break;
+        if (!sendAll(sock, buffer.data(), got)) break;
+    }
+    fclose(file);
     return true;
 }
 
@@ -1083,6 +1411,37 @@ void handleClient(sockaddr_in& client) {
         return;
     }
 
+    if (route == "/api/camera" && method == "GET") {
+        sendSimple(clientSocket, 200, "OK", cameraJson(), "application/json; charset=utf-8");
+        return;
+    }
+
+    if (route == "/api/camera/capture" && method == "POST") {
+        cameraCaptureRequested = true;
+        cameraMode = true;
+        cameraStatus = "Capture demandee depuis l'iPhone";
+        sendSimple(clientSocket, 202, "Accepted", "{\"accepted\":true}", "application/json");
+        return;
+    }
+
+    if (route == "/camera/file" && method == "GET") {
+        const std::string name = getQueryValue(target, "name");
+        sendFileFromDirectory(clientSocket, CAMERA_DIR, name, "image/bmp");
+        return;
+    }
+
+    if (route == "/api/camera/delete" && method == "POST") {
+        const std::string name = sanitizeFilename(getQueryValue(target, "name"));
+        const std::string path = std::string(CAMERA_DIR) + "/" + name;
+        if (remove(path.c_str()) == 0) {
+            if (lastPhotoName == name) lastPhotoName.clear();
+            sendSimple(clientSocket, 200, "OK", "{\"ok\":true}", "application/json");
+        } else {
+            sendSimple(clientSocket, 404, "Not Found", "{\"ok\":false}", "application/json");
+        }
+        return;
+    }
+
     if (route == "/api/text" && method == "POST") {
         const std::string lengthValue = headerValue(headers, "Content-Length");
         const long long contentLength = lengthValue.empty()
@@ -1139,7 +1498,7 @@ void pollServer() {
     closeClient();
 }
 
-void drawTopScreen() {
+void drawHomeTopScreen() {
     C2D_TargetClear(topTarget, COLOR_BG_TOP);
     C2D_SceneBegin(topTarget);
 
@@ -1148,7 +1507,7 @@ void drawTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.3", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.4", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1197,7 +1556,7 @@ void drawTopScreen() {
     }
 }
 
-void drawBottomScreen() {
+void drawHomeBottomScreen() {
     C2D_TargetClear(bottomTarget, COLOR_BG_BOTTOM);
     C2D_SceneBegin(bottomTarget);
 
@@ -1228,6 +1587,69 @@ void drawBottomScreen() {
     drawText("Remote : " + lastRemote, 13, 204, 0.34f, COLOR_MUTED);
     drawText("X Nouveau PIN", 107, 204, 0.34f, COLOR_ORANGE);
     drawText("START Quitter", 220, 204, 0.34f, COLOR_MUTED);
+}
+
+void drawCameraTopScreen() {
+    C2D_TargetClear(topTarget, C2D_Color32(20, 23, 26, 255));
+    C2D_SceneBegin(topTarget);
+
+    C2D_DrawRectSolid(0, 0, 0.1f, 400, 31, C2D_Color32(0, 0, 0, 180));
+    drawText("Camera Link", 13, 5, 0.56f, COLOR_WHITE);
+    drawText("v0.4", 350, 7, 0.34f, C2D_Color32(210, 220, 226, 255));
+
+    // Zone viseur. La capture reelle utilise la camera exterieure ;
+    // l'apercu video continu sera la prochaine couche d'optimisation.
+    C2D_DrawRectSolid(18, 44, 0.20f, 364, 154, C2D_Color32(39, 45, 49, 255));
+    C2D_DrawRectSolid(20, 46, 0.25f, 360, 150, C2D_Color32(25, 30, 33, 255));
+    C2D_DrawLine(200, 91, COLOR_MUTED, 200, 149, COLOR_MUTED, 1.0f, 0.4f);
+    C2D_DrawLine(171, 120, COLOR_MUTED, 229, 120, COLOR_MUTED, 1.0f, 0.4f);
+    C2D_DrawCircleSolid(200, 120, 0.45f, 5, COLOR_BLUE);
+
+    drawCenteredText("Camera exterieure", 200, 62, 0.40f, C2D_Color32(205, 215, 220, 255));
+    drawCenteredText(cameraStatus.substr(0, 42), 200, 207, 0.39f,
+        cameraStatus.find("Echec") != std::string::npos ? COLOR_RED : COLOR_WHITE);
+}
+
+void drawCameraBottomScreen() {
+    C2D_TargetClear(bottomTarget, C2D_Color32(236, 241, 244, 255));
+    C2D_SceneBegin(bottomTarget);
+
+    C2D_DrawRectSolid(0, 0, 0.1f, 320, 37, COLOR_BLUE);
+    drawText("Appareil photo", 13, 8, 0.56f, COLOR_WHITE);
+
+    drawRoundedRect(11, 50, 298, 55, 12, COLOR_WHITE, 0.2f);
+    drawText("Photos de la session", 24, 61, 0.43f, COLOR_TEXT);
+    drawText(std::to_string(cameraPhotoCount), 262, 57, 0.66f, COLOR_BLUE_DARK);
+    if (!lastPhotoName.empty()) drawText(lastPhotoName.substr(0, 28), 24, 84, 0.31f, COLOR_MUTED);
+    else drawText("Aucune photo pour le moment", 24, 84, 0.31f, COLOR_MUTED);
+
+    // Gros declencheur tactile, dans l'esprit de l'appareil photo 3DS.
+    C2D_DrawCircleSolid(160, 164, 0.3f, 38, C2D_Color32(190, 202, 209, 255));
+    C2D_DrawCircleSolid(160, 164, 0.4f, 32, COLOR_WHITE);
+    C2D_DrawCircleSolid(160, 164, 0.5f, 25, COLOR_BLUE);
+    C2D_DrawCircleSolid(160, 164, 0.6f, 18, C2D_Color32(239, 248, 253, 255));
+
+    drawText("B Retour", 17, 213, 0.35f, COLOR_MUTED);
+    drawCenteredText("A  Prendre", 160, 213, 0.35f, COLOR_TEXT);
+    drawText("Y Accueil", 244, 213, 0.35f, COLOR_MUTED);
+}
+
+void drawTopScreen() {
+    if (cameraMode) drawCameraTopScreen();
+    else drawHomeTopScreen();
+}
+
+void drawBottomScreen() {
+    if (cameraMode) drawCameraBottomScreen();
+    else drawHomeBottomScreen();
+}
+
+bool cameraTouchPressed() {
+    touchPosition touch{};
+    hidTouchRead(&touch);
+    const int dx = static_cast<int>(touch.px) - 160;
+    const int dy = static_cast<int>(touch.py) - 164;
+    return dx * dx + dy * dy <= 42 * 42;
 }
 
 bool initGraphics() {
@@ -1272,13 +1694,32 @@ int main() {
         const u32 down = hidKeysDown();
 
         if (down & KEY_START) break;
-        if (down & KEY_A) startServer();
-        if (down & KEY_X) {
-            generatePin();
-            lastAction = "Nouveau code PIN genere";
+
+        if (cameraMode) {
+            if (down & KEY_B || down & KEY_Y) {
+                cameraMode = false;
+                cameraStatus = "Pret a prendre une photo";
+            } else if ((down & KEY_A) || ((down & KEY_TOUCH) && cameraTouchPressed())) {
+                cameraCaptureRequested = true;
+            }
+        } else {
+            if (down & KEY_A) startServer();
+            if (down & KEY_Y) {
+                cameraMode = true;
+                cameraStatus = "Pret - A ou bouton tactile";
+            }
+            if (down & KEY_X) {
+                generatePin();
+                lastAction = "Nouveau code PIN genere";
+            }
         }
 
         pollServer();
+
+        if (cameraCaptureRequested) {
+            cameraCaptureRequested = false;
+            captureCameraPhoto();
+        }
 
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         drawTopScreen();
