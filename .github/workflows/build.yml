@@ -1,0 +1,30 @@
+name: Compiler 3DS Link
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    container:
+      image: devkitpro/devkitarm:latest
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Compiler 3DS Link
+        run: make -j2
+
+      - name: Publier les fichiers compiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3DS-Link-v0.1
+          path: |
+            3DS-Link.3dsx
+            3DS-Link.smdh
+            3DS-Link.elf
