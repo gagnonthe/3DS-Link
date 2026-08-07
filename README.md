@@ -2,7 +2,7 @@
 
 3DS Link crée un pont local entre une Nintendo 3DS et un iPhone, directement par Wi‑Fi.
 
-## v0.3
+## v0.4
 
 La connexion de base de la v0.1 est maintenant transformée en outil réellement utilisable.
 
@@ -22,6 +22,21 @@ La connexion de base de la v0.1 est maintenant transformée en outil réellement
 - QR code de connexion généré directement par la 3DS ;
 - journal d’activité sur l’écran inférieur.
 
+
+### Camera Link (v0.4)
+
+- mode appareil photo accessible avec `Y` ;
+- capture avec la camera exterieure de la 3DS ;
+- gros declencheur tactile ou bouton `A` ;
+- prises multiples pendant la meme session ;
+- photos BMP 400×240 enregistrees dans `sdmc:/3ds/3DS-Link/camera/` ;
+- nouvel onglet **Camera** sur l'iPhone ;
+- une nouvelle photo est recuperee automatiquement par Safari et affichee dans la pellicule ;
+- declenchement possible depuis l'iPhone ;
+- telechargement et suppression de chaque photo.
+
+Cette premiere etape privilegie la fiabilite de la capture et du transfert. Le retour video continu dans le viseur sera ajoute apres validation sur la vraie console, car il demande une boucle camera/GPU differente du rendu Citro2D actuel.
+
 ## Utilisation
 
 1. Mets l’iPhone et la 3DS sur le même Wi‑Fi.
@@ -32,7 +47,9 @@ La connexion de base de la v0.1 est maintenant transformée en outil réellement
 
 ## Commandes 3DS
 
-- `A` : relancer le serveur
+- `A` : relancer le serveur (accueil) / prendre une photo (mode Camera)
+- `Y` : ouvrir/fermer Camera Link
+- `B` : revenir à l’accueil depuis Camera Link
 - `X` : générer un nouveau PIN
 - `START` : quitter
 
