@@ -1228,9 +1228,9 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
   <div class="wrap headrow">
     <div class="brand">
       <div class="appicon">3</div>
-      <div><h1>3DS Link</h1><div class="small">TWiLight-style Companion • Local Link</div></div>
+      <div><h1>3DS Link</h1><div class="small">3DS-style Companion • Local Link</div></div>
     </div>
-    <div class="small">v1.2</div>
+    <div class="small">v1.3</div>
   </div>
 </header>
 
@@ -1313,10 +1313,10 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v1.2 harmonise l’interface 3DS/iPhone et corrige la colorimétrie du flux caméra.</p>
+    <p class="muted">La v1.3 ajoute le launcher tactile, restaure le QR et améliore l’interface 3DS Link.</p>
   </section>
 
-  <footer>3DS Link v1.2 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v1.3 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -2109,6 +2109,45 @@ void pollServer(int maxClients = 3) {
 }
 
 
+
+bool openSelectedHomeItem() {
+    if (homeSelection == 3) {
+        cameraMode = true;
+        cameraCaptureRequested = false;
+        cameraStatus = "Demarrage du viseur...";
+        gfxSetDoubleBuffering(GFX_TOP, true);
+        gfxSetDoubleBuffering(GFX_BOTTOM, false);
+        return true;
+    }
+
+    if (!serverReady) startServer();
+
+    if (homeSelection == 0) lastAction = "Fichiers : ouvre la page iPhone";
+    if (homeSelection == 1) lastAction = "Clavier : utilise l'iPhone";
+    if (homeSelection == 2) lastAction = "Remote : utilise l'iPhone";
+    if (homeSelection == 4) lastAction = "Infos connexion affichees";
+
+    return false;
+}
+
+int touchedHomeTile(const touchPosition& touch) {
+    const int y0 = 78;
+    const int y1 = 145;
+    if (touch.py < y0 || touch.py > y1) return -1;
+
+    for (int i = 0; i < HOME_ITEM_COUNT; ++i) {
+        const int x0 = 5 + i * 63;
+        const int x1 = x0 + 62;
+        if (touch.px >= x0 && touch.px <= x1) return i;
+    }
+    return -1;
+}
+
+bool homeOpenButtonTouched(const touchPosition& touch) {
+    return touch.px >= 32 && touch.px <= 288 &&
+           touch.py >= 176 && touch.py <= 222;
+}
+
 u32 twilightTileColor(int index) {
     static const u32 colors[HOME_ITEM_COUNT] = {
         C2D_Color32(75, 170, 226, 255),
@@ -2159,89 +2198,102 @@ void drawTwilightTile(int index, float x, float y, bool selected) {
 }
 
 void drawHomeTopScreen() {
-    // Composition inspirée du thème Nintendo 3DS de TWiLight Menu++ :
-    // barre d'état fine + grande zone descriptive.
     C2D_TargetClear(topTarget, C2D_Color32(240, 243, 238, 255));
     C2D_SceneBegin(topTarget);
 
-    // Fine barre supérieure
+    // Barre système fine
     C2D_DrawRectSolid(0, 0, 0.10f, 400, 25, C2D_Color32(248, 250, 247, 255));
     C2D_DrawRectSolid(0, 24, 0.12f, 400, 1, C2D_Color32(190, 198, 194, 255));
 
     drawText("3DS Link", 13, 4, 0.43f, COLOR_TEXT);
-    drawText(serverReady ? "Wi-Fi" : "Hors ligne", 292, 5, 0.31f, serverReady ? COLOR_GREEN : COLOR_RED);
-    drawText("v1.2", 354, 5, 0.31f, COLOR_MUTED);
+    C2D_DrawCircleSolid(286, 12, 0.5f, 4, serverReady ? COLOR_GREEN : COLOR_RED);
+    drawText(serverReady ? "Connecte" : "Hors ligne", 296, 5, 0.29f,
+             serverReady ? COLOR_GREEN : COLOR_RED);
+    drawText("v1.3", 359, 5, 0.29f, COLOR_MUTED);
 
-    // Zone principale
-    drawRoundedRect(19, 40, 362, 143, 15, C2D_Color32(214, 219, 216, 95), 0.15f);
-    drawRoundedRect(16, 37, 362, 143, 15, COLOR_WHITE, 0.20f);
+    // Carte principale
+    drawRoundedRect(17, 39, 366, 146, 15, C2D_Color32(203, 210, 206, 100), 0.15f);
+    drawRoundedRect(14, 36, 366, 146, 15, COLOR_WHITE, 0.20f);
 
-    // Grande icône de l'élément sélectionné
-    drawRoundedRect(34, 56, 96, 96, 15, twilightTileColor(homeSelection), 0.35f);
-    drawTwilightIconGlyph(homeSelection, 82, 104, COLOR_WHITE);
+    // Icône sélectionnée
+    drawRoundedRect(31, 55, 88, 88, 14, twilightTileColor(homeSelection), 0.35f);
+    drawTwilightIconGlyph(homeSelection, 75, 99, COLOR_WHITE);
 
-    drawText(HOME_NAMES[homeSelection], 151, 61, 0.63f, COLOR_TEXT);
-    drawText(HOME_DESCRIPTIONS[homeSelection], 151, 94, 0.34f, COLOR_MUTED);
+    drawText(HOME_NAMES[homeSelection], 136, 54, 0.57f, COLOR_TEXT);
 
-    if (homeSelection == 4) {
-        drawText(serverReady ? "iPhone joignable" : "Serveur indisponible", 151, 122, 0.36f,
-                 serverReady ? COLOR_GREEN : COLOR_RED);
-        if (serverReady) drawText(localIp + ":" + std::to_string(PORT), 151, 143, 0.31f, COLOR_BLUE_DARK);
-    } else if (homeSelection == 3) {
-        drawText("A : ouvrir l'appareil photo", 151, 128, 0.34f, COLOR_BLUE_DARK);
+    // Description limitée pour laisser sa place au QR
+    std::string desc = HOME_DESCRIPTIONS[homeSelection];
+    if (desc.size() > 27) desc.resize(27);
+    drawText(desc, 136, 84, 0.29f, COLOR_MUTED);
+
+    if (serverReady) {
+        drawText(localIp + ":" + std::to_string(PORT), 136, 108, 0.27f, COLOR_BLUE_DARK);
+        drawText("PIN " + std::to_string(pinCode), 136, 128, 0.31f, COLOR_ORANGE);
+
+        // QR toujours visible : suffisamment grand pour Safari, sans masquer le launcher.
+        drawRoundedRect(278, 49, 91, 116, 10, C2D_Color32(235, 238, 235, 255), 0.31f);
+        drawRoundedRect(275, 46, 91, 116, 10, COLOR_WHITE, 0.34f);
+        drawCenteredText("SCAN", 320, 51, 0.25f, COLOR_MUTED);
+        drawConnectionQr(320, 108, 78.0f);
     } else {
-        drawText("Fonction disponible sur l'iPhone", 151, 128, 0.32f, COLOR_BLUE_DARK);
+        drawText("A pour relancer le serveur", 136, 120, 0.29f, COLOR_RED);
+        drawRoundedRect(277, 55, 88, 88, 12, C2D_Color32(238, 240, 238, 255), 0.31f);
+        drawCenteredText("QR", 321, 82, 0.46f, COLOR_MUTED);
+        drawCenteredText("indisponible", 321, 107, 0.24f, COLOR_MUTED);
     }
 
-    // Barre d'aide basse façon launcher
+    // Aide
     C2D_DrawRectSolid(0, 204, 0.11f, 400, 36, C2D_Color32(246, 248, 245, 255));
     C2D_DrawRectSolid(0, 204, 0.12f, 400, 1, C2D_Color32(196, 202, 198, 255));
-    drawText("◀ ▶  Choisir", 18, 214, 0.34f, COLOR_MUTED);
-    drawCenteredText("A  Ouvrir", 200, 214, 0.36f, COLOR_TEXT);
-    drawText("Y  Camera", 308, 214, 0.34f, COLOR_MUTED);
+    drawText("◀ ▶ Choisir", 17, 214, 0.32f, COLOR_MUTED);
+    drawCenteredText("A Ouvrir", 200, 214, 0.35f, COLOR_TEXT);
+    drawText("Touchez l'ecran", 292, 214, 0.28f, COLOR_MUTED);
 }
 
 void drawHomeBottomScreen() {
     C2D_TargetClear(bottomTarget, C2D_Color32(231, 235, 231, 255));
     C2D_SceneBegin(bottomTarget);
 
-    // Header minimal façon TWiLight 3DS UI.
     C2D_DrawRectSolid(0, 0, 0.10f, 320, 31, C2D_Color32(247, 249, 246, 255));
     C2D_DrawRectSolid(0, 30, 0.12f, 320, 1, C2D_Color32(184, 194, 189, 255));
     drawCenteredText("3DS Link", 160, 5, 0.46f, COLOR_TEXT);
 
-    // Petit état iPhone
-    C2D_DrawCircleSolid(18, 16, 0.3f, 5, clientSeen ? COLOR_GREEN : COLOR_ORANGE);
-    drawText(clientSeen ? "iPhone" : "Local", 27, 7, 0.30f, COLOR_MUTED);
+    C2D_DrawCircleSolid(16, 15, 0.3f, 5, clientSeen ? COLOR_GREEN : COLOR_ORANGE);
+    drawText(clientSeen ? "iPhone connecte" : "En attente iPhone", 26, 6, 0.27f, COLOR_MUTED);
 
-    // Rangée principale de cinq tuiles.
-    const float startX = 10.0f;
+    // Bande d'instruction tactile
+    drawCenteredText("Touchez une icone pour la selectionner", 160, 42, 0.27f, COLOR_MUTED);
+
+    const float startX = 8.0f;
     const float gap = 63.0f;
-    const float y = 83.0f;
+    const float y = 78.0f;
+
     for (int i = 0; i < HOME_ITEM_COUNT; ++i) {
         drawTwilightTile(i, startX + gap * i, y, i == homeSelection);
     }
 
-    // Flèches de navigation
-    drawText("<", 4, 99, 0.60f, COLOR_MUTED);
-    drawText(">", 307, 99, 0.60f, COLOR_MUTED);
+    drawCenteredText(HOME_NAMES[homeSelection], 160, 145, 0.46f, COLOR_TEXT);
 
-    drawCenteredText(HOME_NAMES[homeSelection], 160, 151, 0.48f, COLOR_TEXT);
-
-    drawRoundedRect(37, 181, 246, 38, 12, COLOR_WHITE, 0.22f);
+    // Vrai bouton tactile Ouvrir
+    drawRoundedRect(34, 177, 252, 43, 12, C2D_Color32(188, 196, 191, 100), 0.20f);
+    drawRoundedRect(31, 174, 252, 43, 12,
+                    homeSelection == 3 ? C2D_Color32(75,170,226,255) : COLOR_WHITE,
+                    0.24f);
     drawCenteredText(
-        homeSelection == 3 ? "A : Ouvrir Camera Link" : "A : Afficher les informations",
-        160, 190, 0.32f, COLOR_MUTED
+        homeSelection == 3 ? "Ouvrir Camera Link" : "Afficher",
+        157,
+        184,
+        0.37f,
+        homeSelection == 3 ? COLOR_WHITE : COLOR_TEXT
     );
 
-    // Indicateurs de page
     for (int i = 0; i < HOME_ITEM_COUNT; ++i) {
         C2D_DrawCircleSolid(
             136 + i * 12,
             229,
             0.4f,
             i == homeSelection ? 4 : 2,
-            i == homeSelection ? C2D_Color32(79, 158, 212, 255) : C2D_Color32(151, 161, 157, 255)
+            i == homeSelection ? C2D_Color32(79,158,212,255) : C2D_Color32(151,161,157,255)
         );
     }
 }
@@ -2251,7 +2303,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v1.2", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v1.3", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
@@ -2445,16 +2497,24 @@ int main() {
             homeSelection = (homeSelection + 1) % HOME_ITEM_COUNT;
         }
 
-        if (down & KEY_A) {
-            if (homeSelection == 3) {
-                cameraMode = true;
-                cameraCaptureRequested = false;
-                cameraStatus = "Demarrage du viseur...";
-                gfxSetDoubleBuffering(GFX_TOP, true);
-                gfxSetDoubleBuffering(GFX_BOTTOM, false);
-                continue;
+        if (down & KEY_TOUCH) {
+            touchPosition touch{};
+            hidTouchRead(&touch);
+
+            const int touched = touchedHomeTile(touch);
+            if (touched >= 0) {
+                if (homeSelection == touched) {
+                    if (openSelectedHomeItem()) continue;
+                } else {
+                    homeSelection = touched;
+                }
+            } else if (homeOpenButtonTouched(touch)) {
+                if (openSelectedHomeItem()) continue;
             }
-            if (!serverReady) startServer();
+        }
+
+        if (down & KEY_A) {
+            if (openSelectedHomeItem()) continue;
         }
 
         if (down & KEY_Y) {
