@@ -1109,7 +1109,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.9</div>
+    <div class="small">v0.9.1</div>
   </div>
 </header>
 
@@ -1192,10 +1192,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.9 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v0.9.1 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.9 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.9.1 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1785,7 +1785,7 @@ void handleClient(sockaddr_in& client) {
             clientSocket,
             503,
             "Service Unavailable",
-            "Flux video iPhone encore desactive en v0.9; commandes et pellicule restent actives."
+            "Flux video iPhone encore desactive en v0.9.1; commandes et pellicule restent actives."
         );
         return;
     }
@@ -1870,14 +1870,8 @@ void pollServer(int maxClients = 3) {
             }
             return;
         }
-
-        // Évite qu'un iPhone lent ou une connexion interrompue bloque la boucle
-        // principale pendant plusieurs secondes.
-        timeval timeout{};
-        timeout.tv_sec = 0;
-        timeout.tv_usec = cameraMode ? 60000 : 180000; // 60 ms camera, 180 ms accueil
-        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-        setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+        // libctru ne fournit pas SO_RCVTIMEO/SO_SNDTIMEO ici.
+        // On garde la stratégie non bloquante/budgetée sans ces options.
 
         const int flags = fcntl(clientSocket, F_GETFL, 0);
         fcntl(clientSocket, F_SETFL, flags & ~O_NONBLOCK);
@@ -1896,7 +1890,7 @@ void drawHomeTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.9", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.9.1", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1983,7 +1977,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v0.9", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v0.9.1", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
@@ -2103,7 +2097,7 @@ int main() {
         if (down & KEY_START) break;
 
         if (cameraMode) {
-            // En v0.9 on donne la priorité absolue au viseur 3DS :
+            // En v0.9.1 on donne la priorité absolue au viseur 3DS :
             // aucune requête HTTP n'est traitée pendant le mode caméra.
             if (!cameraUiPrimed) {
                 primeCameraUiBuffers();
