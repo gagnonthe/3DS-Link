@@ -1,5 +1,6 @@
 #include <3ds.h>
 #include <citro2d.h>
+#include <tex3ds.h>
 #include "qrcodegen.h"
 
 #include <arpa/inet.h>
@@ -81,6 +82,20 @@ bool cameraCaptureRequested = false;
 unsigned int cameraPhotoCount = 0;
 std::string lastPhotoName = "";
 std::string cameraStatus = "Pret a prendre une photo";
+
+bool cameraActive = false;
+bool cameraHasFrame = false;
+Handle cameraReceiveEvent = 0;
+u32 cameraTransferBytes = 0;
+unsigned int cameraWarmupFrames = 0;
+std::vector<u8> cameraFrame(CAMERA_FRAME_BYTES);
+std::vector<u8> cameraReceiveBuffer(CAMERA_FRAME_BYTES);
+
+C3D_Tex cameraTexture{};
+Tex3DS_SubTexture cameraSubTexture{};
+C2D_Image cameraImage{};
+bool cameraTextureReady = false;
+std::vector<u8> cameraTextureBuffer(512 * 256 * 4, 0);
 
 C3D_RenderTarget* topTarget = nullptr;
 C3D_RenderTarget* bottomTarget = nullptr;
@@ -327,6 +342,22 @@ void writeLe32(FILE* f, unsigned int value) {
     fputc((value >> 24) & 0xFF, f);
 }
 
+u8 expand5(unsigned int value) {
+    return static_cast<u8>((value * 255u + 15u) / 31u);
+}
+
+u8 expand6(unsigned int value) {
+    return static_cast<u8>((value * 255u + 31u) / 63u);
+}
+
+// La caméra 3DS renvoie OUTPUT_RGB_565 avec R dans les 5 bits faibles
+// et B dans les 5 bits forts (même disposition que l'exemple officiel devkitPro).
+void unpackCameraPixel(u16 data, u8& r, u8& g, u8& b) {
+    r = expand5(data & 0x1F);
+    g = expand6((data >> 5) & 0x3F);
+    b = expand5((data >> 11) & 0x1F);
+}
+
 bool saveCameraBmp(const std::string& path, const u8* rgb565) {
     FILE* f = fopen(path.c_str(), "wb");
     if (!f) return false;
@@ -358,12 +389,11 @@ bool saveCameraBmp(const std::string& path, const u8* rgb565) {
     const u16* pixels = reinterpret_cast<const u16*>(rgb565);
     const u8 zeroes[3] = {0, 0, 0};
 
+    // BMP stocke les lignes du bas vers le haut.
     for (int y = CAMERA_HEIGHT - 1; y >= 0; --y) {
         for (int x = 0; x < CAMERA_WIDTH; ++x) {
-            const u16 data = pixels[y * CAMERA_WIDTH + x];
-            const u8 b = static_cast<u8>(((data >> 11) & 0x1F) << 3);
-            const u8 g = static_cast<u8>(((data >> 5) & 0x3F) << 2);
-            const u8 r = static_cast<u8>((data & 0x1F) << 3);
+            u8 r, g, b;
+            unpackCameraPixel(pixels[y * CAMERA_WIDTH + x], r, g, b);
             fputc(b, f);
             fputc(g, f);
             fputc(r, f);
@@ -374,6 +404,157 @@ bool saveCameraBmp(const std::string& path, const u8* rgb565) {
     const bool ok = !ferror(f);
     fclose(f);
     return ok;
+}
+
+void stopCameraStream() {
+    if (cameraReceiveEvent) {
+        svcCloseHandle(cameraReceiveEvent);
+        cameraReceiveEvent = 0;
+    }
+
+    if (cameraActive) {
+        CAMU_StopCapture(PORT_CAM1);
+        CAMU_Activate(SELECT_NONE);
+        camExit();
+        cameraActive = false;
+    }
+
+    cameraHasFrame = false;
+    cameraWarmupFrames = 0;
+}
+
+bool startCameraStream() {
+    if (cameraActive) return true;
+
+    cameraStatus = "Demarrage du viseur...";
+
+    const Result initResult = camInit();
+    if (R_FAILED(initResult)) {
+        cameraStatus = "Impossible d'initialiser la camera";
+        return false;
+    }
+
+    bool ok = true;
+
+    if (R_FAILED(CAMU_SetSize(SELECT_OUT1, SIZE_CTR_TOP_LCD, CONTEXT_A))) ok = false;
+    if (ok && R_FAILED(CAMU_SetOutputFormat(SELECT_OUT1, OUTPUT_RGB_565, CONTEXT_A))) ok = false;
+    if (ok) CAMU_SetFrameRate(SELECT_OUT1, FRAME_RATE_15);
+    if (ok) CAMU_SetNoiseFilter(SELECT_OUT1, true);
+    if (ok) CAMU_SetAutoExposure(SELECT_OUT1, true);
+    if (ok) CAMU_SetAutoWhiteBalance(SELECT_OUT1, true);
+    if (ok) CAMU_SetTrimming(PORT_CAM1, false);
+    if (ok && R_FAILED(CAMU_GetMaxBytes(&cameraTransferBytes, CAMERA_WIDTH, CAMERA_HEIGHT))) ok = false;
+    if (ok && R_FAILED(CAMU_SetTransferBytes(
+        PORT_CAM1,
+        cameraTransferBytes,
+        CAMERA_WIDTH,
+        CAMERA_HEIGHT
+    ))) ok = false;
+    if (ok && R_FAILED(CAMU_Activate(SELECT_OUT1))) ok = false;
+
+    if (ok) {
+        CAMU_ClearBuffer(PORT_CAM1);
+        if (R_FAILED(CAMU_StartCapture(PORT_CAM1))) ok = false;
+    }
+
+    if (!ok) {
+        CAMU_Activate(SELECT_NONE);
+        camExit();
+        cameraStatus = "Echec du demarrage camera";
+        return false;
+    }
+
+    cameraActive = true;
+    cameraHasFrame = false;
+    cameraWarmupFrames = 0;
+    cameraStatus = "Reglage exposition et couleurs...";
+    return true;
+}
+
+bool initCameraTexture() {
+    if (cameraTextureReady) return true;
+
+    if (!C3D_TexInit(&cameraTexture, 512, 256, GPU_RGBA8)) {
+        cameraStatus = "Texture camera indisponible";
+        return false;
+    }
+
+    C3D_TexSetFilter(&cameraTexture, GPU_LINEAR, GPU_LINEAR);
+    C3D_TexSetWrap(&cameraTexture, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+
+    cameraSubTexture = {
+        static_cast<u16>(CAMERA_WIDTH),
+        static_cast<u16>(CAMERA_HEIGHT),
+        0.0f,
+        1.0f,
+        static_cast<float>(CAMERA_WIDTH) / 512.0f,
+        1.0f - static_cast<float>(CAMERA_HEIGHT) / 256.0f
+    };
+
+    cameraImage = { &cameraTexture, &cameraSubTexture };
+    cameraTextureReady = true;
+    return true;
+}
+
+void updateCameraTexture() {
+    if (!cameraHasFrame || !initCameraTexture()) return;
+
+    std::fill(cameraTextureBuffer.begin(), cameraTextureBuffer.end(), 0);
+
+    const u16* pixels = reinterpret_cast<const u16*>(cameraFrame.data());
+
+    for (int y = 0; y < CAMERA_HEIGHT; ++y) {
+        for (int x = 0; x < CAMERA_WIDTH; ++x) {
+            u8 r, g, b;
+            unpackCameraPixel(pixels[y * CAMERA_WIDTH + x], r, g, b);
+
+            const size_t dst = (static_cast<size_t>(y) * 512 + x) * 4;
+            cameraTextureBuffer[dst + 0] = r;
+            cameraTextureBuffer[dst + 1] = g;
+            cameraTextureBuffer[dst + 2] = b;
+            cameraTextureBuffer[dst + 3] = 255;
+        }
+    }
+
+    C3D_TexUpload(&cameraTexture, cameraTextureBuffer.data());
+}
+
+void pollCameraFrame() {
+    if (!cameraActive) return;
+
+    if (!cameraReceiveEvent) {
+        const Result result = CAMU_SetReceiving(
+            &cameraReceiveEvent,
+            cameraReceiveBuffer.data(),
+            PORT_CAM1,
+            CAMERA_FRAME_BYTES,
+            static_cast<s16>(cameraTransferBytes)
+        );
+
+        if (R_FAILED(result)) {
+            cameraStatus = "Erreur reception camera";
+            stopCameraStream();
+        }
+        return;
+    }
+
+    const Result wait = svcWaitSynchronization(cameraReceiveEvent, 0);
+    if (R_SUCCEEDED(wait)) {
+        svcCloseHandle(cameraReceiveEvent);
+        cameraReceiveEvent = 0;
+
+        cameraFrame.swap(cameraReceiveBuffer);
+        cameraHasFrame = true;
+        ++cameraWarmupFrames;
+
+        updateCameraTexture();
+
+        if (cameraWarmupFrames < 4) {
+            cameraStatus = "Reglage exposition et couleurs...";
+        } else {
+            cameraStatus = "LIVE - pret a prendre une photo";
+        }
+    }
 }
 
 std::string makeCameraFilename() {
@@ -391,65 +572,13 @@ std::string makeCameraFilename() {
 
 bool captureCameraPhoto() {
     ensureDirectories();
-    cameraStatus = "Initialisation de la camera...";
 
-    std::vector<u8> frame(CAMERA_FRAME_BYTES);
-    if (frame.empty()) {
-        cameraStatus = "Memoire insuffisante";
+    if (!cameraActive && !startCameraStream()) {
         return false;
     }
 
-    Result result = camInit();
-    if (R_FAILED(result)) {
-        cameraStatus = "Impossible d'initialiser la camera";
-        return false;
-    }
-
-    bool ok = true;
-    Handle receiveEvent = 0;
-    u32 transferBytes = 0;
-
-    if (R_FAILED(CAMU_SetSize(SELECT_OUT1, SIZE_CTR_TOP_LCD, CONTEXT_A))) ok = false;
-    if (ok && R_FAILED(CAMU_SetOutputFormat(SELECT_OUT1, OUTPUT_RGB_565, CONTEXT_A))) ok = false;
-    if (ok) CAMU_SetFrameRate(SELECT_OUT1, FRAME_RATE_30);
-    if (ok) CAMU_SetNoiseFilter(SELECT_OUT1, true);
-    if (ok) CAMU_SetAutoExposure(SELECT_OUT1, true);
-    if (ok) CAMU_SetAutoWhiteBalance(SELECT_OUT1, true);
-    if (ok) CAMU_SetTrimming(PORT_CAM1, false);
-    if (ok && R_FAILED(CAMU_GetMaxBytes(&transferBytes, CAMERA_WIDTH, CAMERA_HEIGHT))) ok = false;
-    if (ok && R_FAILED(CAMU_SetTransferBytes(PORT_CAM1, transferBytes, CAMERA_WIDTH, CAMERA_HEIGHT))) ok = false;
-    if (ok && R_FAILED(CAMU_Activate(SELECT_OUT1))) ok = false;
-
-    if (ok) {
-        CAMU_ClearBuffer(PORT_CAM1);
-        if (R_FAILED(CAMU_StartCapture(PORT_CAM1))) ok = false;
-    }
-
-    if (ok && R_FAILED(CAMU_SetReceiving(
-        &receiveEvent,
-        frame.data(),
-        PORT_CAM1,
-        CAMERA_FRAME_BYTES,
-        static_cast<s16>(transferBytes)
-    ))) {
-        ok = false;
-    }
-
-    if (ok) {
-        cameraStatus = "Capture en cours...";
-        const Result wait = svcWaitSynchronization(receiveEvent, CAMERA_WAIT_TIMEOUT);
-        if (R_FAILED(wait)) ok = false;
-    }
-
-    if (ok) CAMU_PlayShutterSound(SHUTTER_SOUND_TYPE_NORMAL);
-    CAMU_StopCapture(PORT_CAM1);
-    if (receiveEvent) svcCloseHandle(receiveEvent);
-    CAMU_Activate(SELECT_NONE);
-    camExit();
-
-    if (!ok) {
-        cameraStatus = "Echec de la capture";
-        lastAction = "Camera : capture echouee";
+    if (!cameraHasFrame || cameraWarmupFrames < 3) {
+        cameraStatus = "Attends une seconde : reglage des couleurs...";
         return false;
     }
 
@@ -457,15 +586,102 @@ bool captureCameraPhoto() {
     const std::string name = makeCameraFilename();
     const std::string path = std::string(CAMERA_DIR) + "/" + name;
 
-    if (!saveCameraBmp(path, frame.data())) {
+    if (!saveCameraBmp(path, cameraFrame.data())) {
         cameraStatus = "Erreur d'ecriture sur la carte SD";
         lastAction = "Camera : erreur SD";
         return false;
     }
 
+    CAMU_PlayShutterSound(SHUTTER_SOUND_TYPE_NORMAL);
+
     lastPhotoName = name;
-    cameraStatus = "Photo prise - envoyee au site";
+    cameraStatus = "Photo prise - disponible sur l'iPhone";
     lastAction = "Camera : " + name;
+    return true;
+}
+
+bool sendLiveCameraBmp(int sock) {
+    if (!cameraHasFrame) {
+        sendSimple(sock, 503, "Service Unavailable", "Camera pas encore prete");
+        return false;
+    }
+
+    const unsigned int rowBytes = CAMERA_WIDTH * 3;
+    const unsigned int padding = (4 - (rowBytes % 4)) % 4;
+    const unsigned int stride = rowBytes + padding;
+    const unsigned int pixelBytes = stride * CAMERA_HEIGHT;
+    const unsigned int fileBytes = 54 + pixelBytes;
+
+    char httpHeader[256];
+    const int httpHeaderLength = std::snprintf(
+        httpHeader,
+        sizeof(httpHeader),
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: image/bmp\r\n"
+        "Content-Length: %u\r\n"
+        "Cache-Control: no-store, no-cache, must-revalidate\r\n"
+        "Connection: close\r\n\r\n",
+        fileBytes
+    );
+
+    if (httpHeaderLength <= 0 ||
+        !sendAll(sock, httpHeader, static_cast<size_t>(httpHeaderLength))) {
+        return false;
+    }
+
+    u8 bmpHeader[54]{};
+    auto put16 = [&](int pos, unsigned int value) {
+        bmpHeader[pos] = value & 0xFF;
+        bmpHeader[pos + 1] = (value >> 8) & 0xFF;
+    };
+    auto put32 = [&](int pos, unsigned int value) {
+        bmpHeader[pos] = value & 0xFF;
+        bmpHeader[pos + 1] = (value >> 8) & 0xFF;
+        bmpHeader[pos + 2] = (value >> 16) & 0xFF;
+        bmpHeader[pos + 3] = (value >> 24) & 0xFF;
+    };
+
+    put16(0, 0x4D42);
+    put32(2, fileBytes);
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, CAMERA_WIDTH);
+    put32(22, CAMERA_HEIGHT);
+    put16(26, 1);
+    put16(28, 24);
+    put32(34, pixelBytes);
+    put32(38, 2835);
+    put32(42, 2835);
+
+    if (!sendAll(sock, reinterpret_cast<const char*>(bmpHeader), sizeof(bmpHeader))) {
+        return false;
+    }
+
+    const u16* pixels = reinterpret_cast<const u16*>(cameraFrame.data());
+    std::vector<u8> row(stride, 0);
+
+    for (int y = CAMERA_HEIGHT - 1; y >= 0; --y) {
+        size_t offset = 0;
+
+        for (int x = 0; x < CAMERA_WIDTH; ++x) {
+            u8 r, g, b;
+            unpackCameraPixel(pixels[y * CAMERA_WIDTH + x], r, g, b);
+            row[offset++] = b;
+            row[offset++] = g;
+            row[offset++] = r;
+        }
+
+        while (offset < row.size()) row[offset++] = 0;
+
+        if (!sendAll(
+            sock,
+            reinterpret_cast<const char*>(row.data()),
+            row.size()
+        )) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -794,14 +1010,14 @@ textarea{width:100%;min-height:120px;border:1px solid #b8cbd7;border-radius:12px
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px}
 .lock{color:#a2631e}
-@media(max-width:420px){h1{font-size:25px}.actions{flex-direction:column}.file{grid-template-columns:1fr auto}}
+@media(max-width:420px){h1{font-size:25px}.actions{flex-direction:column}.file{grid-template-columns:1fr auto}#liveCamera{min-height:180px}}
 </style>
 </head>
 <body>
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.4</div>
+    <div class="small">v0.5</div>
   </div>
 </header>
 
@@ -819,7 +1035,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
     <button class="tab active" onclick="showTab('files',this)">Fichiers</button>
     <button class="tab" onclick="showTab('text',this)">Clavier</button>
     <button class="tab" onclick="showTab('remote',this)">Remote</button>
-    <button class="tab" onclick="showTab('camera',this);loadCamera(true)">Camera</button>
+    <button class="tab" onclick="showTab('camera',this);startCameraLive();loadCamera(true)">Camera</button>
     <button class="tab" onclick="showTab('info',this)">Infos</button>
   </div>
 
@@ -865,10 +1081,17 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 
 
   <section id="camera" class="panel">
-    <h2>Camera Link</h2>
-    <div class="muted">Prends plusieurs photos avec la camera exterieure de la 3DS. Chaque nouvelle photo arrive automatiquement sur cette page.</div>
-    <button style="margin-top:12px;width:100%;font-size:17px;padding:14px" onclick="remoteCapture()">📷 Prendre une photo sur la 3DS</button>
-    <div id="cameraState" class="muted" style="margin-top:9px">Tu peux aussi appuyer sur Y puis A directement sur la console.</div>
+    <h2>Live Camera</h2>
+    <div class="muted">Le viseur de la 3DS est reproduit ici en direct sur ton iPhone. Le flux reste entièrement sur ton réseau local.</div>
+
+    <div style="margin-top:12px;background:#101416;border-radius:16px;padding:8px;position:relative;overflow:hidden">
+      <img id="liveCamera" style="display:block;width:100%;aspect-ratio:5/3;object-fit:contain;border-radius:10px;background:#090b0c" alt="Flux caméra 3DS">
+      <div id="liveBadge" style="position:absolute;left:18px;top:18px;background:#d64048;color:#fff;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800">LIVE</div>
+    </div>
+
+    <div id="cameraState" class="muted" style="margin-top:9px">Connexion au viseur…</div>
+    <button style="margin-top:12px;width:100%;font-size:17px;padding:14px" onclick="remoteCapture()">📷 Prendre une photo</button>
+
     <div id="cameraPreview" style="margin-top:14px"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px"><strong>Pellicule</strong><button class="secondary" onclick="loadCamera(true)">Actualiser</button></div>
     <div id="cameraRoll" class="filelist"></div>
@@ -877,10 +1100,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.4 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v0.5 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.4 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.5 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1016,6 +1239,42 @@ async function remote(key){
 
 let latestCameraName='';
 let latestCameraUrl='';
+let liveCameraTimer=null;
+let liveCameraObjectUrl='';
+
+async function refreshLiveCamera(){
+  if(!$('camera').classList.contains('active') || !pin) return;
+
+  try{
+    const r=await fetch('/camera/live.bmp?t='+Date.now(),{
+      headers:headers(),
+      cache:'no-store'
+    });
+
+    if(r.status===503){
+      $('cameraState').textContent='La caméra démarre…';
+      return;
+    }
+
+    if(!r.ok) return;
+
+    const blob=await r.blob();
+    const next=URL.createObjectURL(blob);
+    $('liveCamera').src=next;
+
+    if(liveCameraObjectUrl) URL.revokeObjectURL(liveCameraObjectUrl);
+    liveCameraObjectUrl=next;
+    $('cameraState').textContent='Flux direct actif • couleurs stabilisées par la caméra 3DS';
+  }catch(e){
+    $('cameraState').textContent='Flux temporairement indisponible';
+  }
+}
+
+function startCameraLive(){
+  if(liveCameraTimer) clearInterval(liveCameraTimer);
+  refreshLiveCamera();
+  liveCameraTimer=setInterval(refreshLiveCamera,420);
+}
 
 async function fetchCameraBlob(name){
   const r=await fetch('/camera/file?name='+encodeURIComponent(name),{headers:headers()});
@@ -1411,6 +1670,16 @@ void handleClient(sockaddr_in& client) {
         return;
     }
 
+    if (route == "/camera/live.bmp" && method == "GET") {
+        if (!cameraMode) {
+            cameraMode = true;
+            cameraStatus = "Demarrage demande par l'iPhone";
+        }
+
+        sendLiveCameraBmp(clientSocket);
+        return;
+    }
+
     if (route == "/api/camera" && method == "GET") {
         sendSimple(clientSocket, 200, "OK", cameraJson(), "application/json; charset=utf-8");
         return;
@@ -1507,7 +1776,7 @@ void drawHomeTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.4", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.5", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1590,24 +1859,47 @@ void drawHomeBottomScreen() {
 }
 
 void drawCameraTopScreen() {
-    C2D_TargetClear(topTarget, C2D_Color32(20, 23, 26, 255));
+    C2D_TargetClear(topTarget, C2D_Color32(10, 12, 14, 255));
     C2D_SceneBegin(topTarget);
 
-    C2D_DrawRectSolid(0, 0, 0.1f, 400, 31, C2D_Color32(0, 0, 0, 180));
-    drawText("Camera Link", 13, 5, 0.56f, COLOR_WHITE);
-    drawText("v0.4", 350, 7, 0.34f, C2D_Color32(210, 220, 226, 255));
+    if (cameraHasFrame && cameraTextureReady) {
+        C2D_DrawImageAt(
+            cameraImage,
+            0.0f,
+            0.0f,
+            0.15f,
+            nullptr,
+            1.0f,
+            1.0f
+        );
+    } else {
+        C2D_DrawRectSolid(0, 0, 0.1f, 400, 240, C2D_Color32(18, 22, 25, 255));
+        drawCenteredText("Demarrage de la camera...", 200, 108, 0.48f, COLOR_WHITE);
+    }
 
-    // Zone viseur. La capture reelle utilise la camera exterieure ;
-    // l'apercu video continu sera la prochaine couche d'optimisation.
-    C2D_DrawRectSolid(18, 44, 0.20f, 364, 154, C2D_Color32(39, 45, 49, 255));
-    C2D_DrawRectSolid(20, 46, 0.25f, 360, 150, C2D_Color32(25, 30, 33, 255));
-    C2D_DrawLine(200, 91, COLOR_MUTED, 200, 149, COLOR_MUTED, 1.0f, 0.4f);
-    C2D_DrawLine(171, 120, COLOR_MUTED, 229, 120, COLOR_MUTED, 1.0f, 0.4f);
-    C2D_DrawCircleSolid(200, 120, 0.45f, 5, COLOR_BLUE);
+    // Bandeaux discrets par-dessus le viseur, dans l'esprit de l'appareil photo 3DS.
+    C2D_DrawRectSolid(0, 0, 0.70f, 400, 29, C2D_Color32(0, 0, 0, 155));
+    C2D_DrawRectSolid(0, 207, 0.70f, 400, 33, C2D_Color32(0, 0, 0, 155));
 
-    drawCenteredText("Camera exterieure", 200, 62, 0.40f, C2D_Color32(205, 215, 220, 255));
-    drawCenteredText(cameraStatus.substr(0, 42), 200, 207, 0.39f,
-        cameraStatus.find("Echec") != std::string::npos ? COLOR_RED : COLOR_WHITE);
+    drawText("Camera Link", 12, 5, 0.52f, COLOR_WHITE);
+    drawText("v0.5", 352, 7, 0.32f, C2D_Color32(220, 226, 230, 255));
+
+    C2D_DrawCircleSolid(
+        312,
+        15,
+        0.8f,
+        5,
+        cameraHasFrame ? COLOR_GREEN : COLOR_ORANGE
+    );
+    drawText(cameraHasFrame ? "LIVE" : "...", 322, 7, 0.32f, COLOR_WHITE);
+
+    drawCenteredText(
+        cameraStatus.substr(0, 44),
+        200,
+        214,
+        0.34f,
+        COLOR_WHITE
+    );
 }
 
 void drawCameraBottomScreen() {
@@ -1696,8 +1988,11 @@ int main() {
         if (down & KEY_START) break;
 
         if (cameraMode) {
+            if (!cameraActive) startCameraStream();
+
             if (down & KEY_B || down & KEY_Y) {
                 cameraMode = false;
+                stopCameraStream();
                 cameraStatus = "Pret a prendre une photo";
             } else if ((down & KEY_A) || ((down & KEY_TOUCH) && cameraTouchPressed())) {
                 cameraCaptureRequested = true;
@@ -1716,7 +2011,15 @@ int main() {
 
         pollServer();
 
-        if (cameraCaptureRequested) {
+        if (cameraMode && !cameraActive) {
+            startCameraStream();
+        }
+
+        if (cameraActive) {
+            pollCameraFrame();
+        }
+
+        if (cameraCaptureRequested && cameraHasFrame && cameraWarmupFrames >= 3) {
             cameraCaptureRequested = false;
             captureCameraPhoto();
         }
@@ -1729,6 +2032,11 @@ int main() {
         C2D_TextBufClear(textBuffer);
     }
 
+    stopCameraStream();
+    if (cameraTextureReady) {
+        C3D_TexDelete(&cameraTexture);
+        cameraTextureReady = false;
+    }
     stopServer();
     shutdownGraphics();
     return 0;
