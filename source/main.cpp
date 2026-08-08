@@ -90,6 +90,8 @@ u32 cameraTransferBytes = 0;
 u8* cameraRawBuffer = nullptr;
 bool cameraCaptureInterrupted = false;
 unsigned int cameraWarmupFrames = 0;
+std::vector<u8> lastCapturedFrame(CAMERA_FRAME_BYTES, 0);
+bool lastCapturedFrameReady = false;
 
 
 C3D_RenderTarget* topTarget = nullptr;
@@ -100,6 +102,8 @@ struct FileEntry {
     std::string name;
     long long size = 0;
 };
+
+std::vector<FileEntry> cameraSessionPhotos;
 
 std::string connectionUrl() {
     return "http://" + localIp + ":" + std::to_string(PORT);
@@ -685,6 +689,18 @@ bool captureCameraPhoto() {
     cameraPhotoCount = nextPhotoNumber;
     lastPhotoName = name;
 
+    // Conserver exactement la frame photographiée en RAM : l'iPhone peut
+    // afficher sa miniature immédiatement sans relire le BMP sur la SD.
+    std::memcpy(lastCapturedFrame.data(), cameraRawBuffer, CAMERA_FRAME_BYTES);
+    lastCapturedFrameReady = true;
+
+    struct stat photoStat{};
+    long long photoSize = 0;
+    if (stat(path.c_str(), &photoStat) == 0) {
+        photoSize = static_cast<long long>(photoStat.st_size);
+    }
+    cameraSessionPhotos.insert(cameraSessionPhotos.begin(), {name, photoSize});
+
     CAMU_PlayShutterSound(SHUTTER_SOUND_TYPE_NORMAL);
 
     cameraStatus = "Photo " + std::to_string(cameraPhotoCount) + " enregistree";
@@ -692,16 +708,16 @@ bool captureCameraPhoto() {
     return true;
 }
 
-bool sendLiveCameraBmp(int sock) {
-    if (!cameraHasFrame || !cameraRawBuffer) {
+bool sendCameraPreviewBmp(int sock, const u8* source, int outWidth = 160, int outHeight = 96) {
+    if (!source) {
         sendSimple(sock, 503, "Service Unavailable", "Camera pas encore prete");
         return false;
     }
 
-    const unsigned int rowBytes = CAMERA_WIDTH * 3;
+    const unsigned int rowBytes = static_cast<unsigned int>(outWidth * 3);
     const unsigned int padding = (4 - (rowBytes % 4)) % 4;
     const unsigned int stride = rowBytes + padding;
-    const unsigned int pixelBytes = stride * CAMERA_HEIGHT;
+    const unsigned int pixelBytes = stride * static_cast<unsigned int>(outHeight);
     const unsigned int fileBytes = 54 + pixelBytes;
 
     char httpHeader[256];
@@ -737,8 +753,8 @@ bool sendLiveCameraBmp(int sock) {
     put32(2, fileBytes);
     put32(10, 54);
     put32(14, 40);
-    put32(18, CAMERA_WIDTH);
-    put32(22, CAMERA_HEIGHT);
+    put32(18, static_cast<unsigned int>(outWidth));
+    put32(22, static_cast<unsigned int>(outHeight));
     put16(26, 1);
     put16(28, 24);
     put32(34, pixelBytes);
@@ -749,15 +765,19 @@ bool sendLiveCameraBmp(int sock) {
         return false;
     }
 
-    const u16* pixels = reinterpret_cast<const u16*>(cameraRawBuffer);
+    const u16* pixels = reinterpret_cast<const u16*>(source);
     std::vector<u8> row(stride, 0);
 
-    for (int y = CAMERA_HEIGHT - 1; y >= 0; --y) {
+    // Downsampling à la volée : 160×96 = ~46 Ko au lieu de ~281 Ko.
+    // Cela réduit fortement le temps pendant lequel le réseau occupe la 3DS.
+    for (int oy = outHeight - 1; oy >= 0; --oy) {
+        const int sy = (oy * CAMERA_HEIGHT) / outHeight;
         size_t offset = 0;
 
-        for (int x = 0; x < CAMERA_WIDTH; ++x) {
+        for (int ox = 0; ox < outWidth; ++ox) {
+            const int sx = (ox * CAMERA_WIDTH) / outWidth;
             u8 r, g, b;
-            unpackCameraPixel(pixels[y * CAMERA_WIDTH + x], r, g, b);
+            unpackCameraPixel(pixels[sy * CAMERA_WIDTH + sx], r, g, b);
             row[offset++] = b;
             row[offset++] = g;
             row[offset++] = r;
@@ -765,16 +785,28 @@ bool sendLiveCameraBmp(int sock) {
 
         while (offset < row.size()) row[offset++] = 0;
 
-        if (!sendAll(
-            sock,
-            reinterpret_cast<const char*>(row.data()),
-            row.size()
-        )) {
+        if (!sendAll(sock, reinterpret_cast<const char*>(row.data()), row.size())) {
             return false;
         }
     }
 
     return true;
+}
+
+bool sendLiveCameraBmp(int sock) {
+    if (!cameraHasFrame || !cameraRawBuffer) {
+        sendSimple(sock, 503, "Service Unavailable", "Camera pas encore prete");
+        return false;
+    }
+    return sendCameraPreviewBmp(sock, cameraRawBuffer);
+}
+
+bool sendLastCapturedPreviewBmp(int sock) {
+    if (!lastCapturedFrameReady) {
+        sendSimple(sock, 404, "Not Found", "Aucune photo de session");
+        return false;
+    }
+    return sendCameraPreviewBmp(sock, lastCapturedFrame.data());
 }
 
 std::vector<FileEntry> listCameraPhotos() {
@@ -800,15 +832,18 @@ std::vector<FileEntry> listCameraPhotos() {
 }
 
 std::string cameraJson() {
-    const auto files = listCameraPhotos();
     std::string json = "{\"photos\":[";
-    for (size_t i = 0; i < files.size(); ++i) {
+    for (size_t i = 0; i < cameraSessionPhotos.size(); ++i) {
         if (i) json += ",";
-        json += "{\"name\":\"" + jsonEscape(files[i].name) + "\",\"size\":" +
-                std::to_string(files[i].size) + "}";
+        json += "{\"name\":\"" + jsonEscape(cameraSessionPhotos[i].name) +
+                "\",\"size\":" + std::to_string(cameraSessionPhotos[i].size) + "}";
     }
-    json += "],\"count\":" + std::to_string(files.size()) +
-            ",\"latest\":\"" + jsonEscape(lastPhotoName) + "\"}";
+    json += "],\"count\":" + std::to_string(cameraSessionPhotos.size()) +
+            ",\"latest\":\"" + jsonEscape(lastPhotoName) + "\"" +
+            ",\"captureCount\":" + std::to_string(cameraPhotoCount) +
+            ",\"cameraActive\":" + std::string(cameraActive ? "true" : "false") +
+            ",\"hasFrame\":" + std::string(cameraHasFrame ? "true" : "false") +
+            "}";
     return json;
 }
 
@@ -1109,7 +1144,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.9.1</div>
+    <div class="small">v1.0</div>
   </div>
 </header>
 
@@ -1174,7 +1209,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 
   <section id="camera" class="panel">
     <h2>Camera</h2>
-    <div class="muted">Synchronisation rapide avec la 3DS. Les commandes Camera restent actives pendant le viseur.</div>
+    <div class="muted">Flux léger en direct, commandes prioritaires et photos synchronisées avec la 3DS.</div>
 
     <div style="margin-top:12px;background:#101416;border-radius:16px;padding:8px;position:relative;overflow:hidden">
       <img id="liveCamera" style="display:block;width:100%;aspect-ratio:5/3;object-fit:contain;border-radius:10px;background:#090b0c" alt="Flux caméra 3DS">
@@ -1192,10 +1227,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.9.1 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v1.0 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.9.1 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v1.0 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1331,119 +1366,192 @@ async function remote(key){
 
 let latestCameraName='';
 let latestCameraUrl='';
-let liveCameraTimer=null;
 let liveCameraObjectUrl='';
+let cameraPumpTimer=null;
+let cameraPumpBusy=false;
+let cameraPumpTick=0;
+let capturePending=false;
+let captureBefore='';
 
 async function refreshLiveCamera(){
-  if(!$('camera').classList.contains('active') || !pin) return;
+  const r=await fetch('/camera/live.bmp?t='+Date.now(),{
+    headers:headers(),
+    cache:'no-store'
+  });
 
-  try{
-    const r=await fetch('/camera/live.bmp?t='+Date.now(),{
-      headers:headers(),
-      cache:'no-store'
-    });
-
-    if(r.status===503){
-      $('cameraState').textContent='La caméra démarre…';
-      return;
-    }
-
-    if(!r.ok) return;
-
-    const blob=await r.blob();
-    const next=URL.createObjectURL(blob);
-    $('liveCamera').src=next;
-
-    if(liveCameraObjectUrl) URL.revokeObjectURL(liveCameraObjectUrl);
-    liveCameraObjectUrl=next;
-    $('cameraState').textContent='Flux direct actif • exposition automatique 3DS';
-  }catch(e){
-    $('cameraState').textContent='Flux temporairement indisponible';
+  if(r.status===503){
+    $('cameraState').textContent='La caméra démarre…';
+    return;
   }
-}
+  if(!r.ok) throw new Error('Flux indisponible');
 
-function startCameraLive(){
-  if(liveCameraTimer) clearInterval(liveCameraTimer);
-  refreshLiveCamera();
-  liveCameraTimer=setInterval(refreshLiveCamera,300);
+  const blob=await r.blob();
+  const next=URL.createObjectURL(blob);
+  $('liveCamera').src=next;
+
+  if(liveCameraObjectUrl) URL.revokeObjectURL(liveCameraObjectUrl);
+  liveCameraObjectUrl=next;
 }
 
 async function fetchCameraBlob(name){
-  const r=await fetch('/camera/file?name='+encodeURIComponent(name),{headers:headers()});
-  if(!r.ok) throw new Error('Photo indisponible');
+  const r=await fetch('/camera/file?name='+encodeURIComponent(name)+'&t='+Date.now(),{
+    headers:headers(),
+    cache:'no-store'
+  });
+  if(!r.ok) throw new Error(r.status===423?'Photo occupée':'Photo indisponible');
   return await r.blob();
 }
 
+async function showLatestCapturedPreview(name){
+  try{
+    const r=await fetch('/camera/last-preview.bmp?t='+Date.now(),{
+      headers:headers(),
+      cache:'no-store'
+    });
+    if(!r.ok) throw new Error('Miniature indisponible');
+
+    const blob=await r.blob();
+    if(latestCameraUrl) URL.revokeObjectURL(latestCameraUrl);
+    latestCameraUrl=URL.createObjectURL(blob);
+    latestCameraName=name;
+
+    $('cameraPreview').innerHTML=`<div style="background:#111;border-radius:14px;padding:8px"><img src="${latestCameraUrl}" style="display:block;width:100%;border-radius:9px" alt="Derniere photo"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="secondary" style="flex:1" onclick='showCameraPhoto(${JSON.stringify(name)})'>Voir en qualité complète</button><button class="secondary" style="flex:1" onclick='saveCameraPhoto(${JSON.stringify(name)})'>Télécharger</button><button class="danger" onclick='deleteCameraPhoto(${JSON.stringify(name)})'>Supprimer</button></div>`;
+  }catch(e){}
+}
+
 async function showCameraPhoto(name){
-  if(!name || name===latestCameraName) return;
+  if(!name) return;
+  $('cameraState').textContent='Chargement de la photo complète…';
   try{
     const blob=await fetchCameraBlob(name);
     if(latestCameraUrl) URL.revokeObjectURL(latestCameraUrl);
     latestCameraUrl=URL.createObjectURL(blob);
     latestCameraName=name;
-    $('cameraPreview').innerHTML=`<div style="background:#111;border-radius:14px;padding:8px"><img src="${latestCameraUrl}" style="display:block;width:100%;border-radius:9px" alt="Derniere photo"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="secondary" style="flex:1" onclick='saveCameraPhoto(${JSON.stringify(name)})'>Télécharger</button><button class="danger" onclick='deleteCameraPhoto(${JSON.stringify(name)})'>Supprimer</button></div>`;
-    $('cameraState').textContent='Nouvelle photo reçue automatiquement : '+name;
-  }catch(e){ $('cameraState').textContent=e.message; }
+    $('cameraPreview').innerHTML=`<div style="background:#111;border-radius:14px;padding:8px"><img src="${latestCameraUrl}" style="display:block;width:100%;border-radius:9px" alt="Photo"></div><div style="display:flex;gap:8px;margin-top:8px"><button class="secondary" style="flex:1" onclick='saveCameraPhoto(${JSON.stringify(name)})'>Télécharger</button><button class="danger" onclick='deleteCameraPhoto(${JSON.stringify(name)})'>Supprimer</button></div>`;
+    $('cameraState').textContent='Photo complète affichée';
+  }catch(e){
+    $('cameraState').textContent=e.message;
+    toast(e.message);
+  }
 }
 
-function renderCamera(data, forcePreview=false){
+function renderCamera(data){
   const roll=$('cameraRoll');
   if(!data.photos.length){
     roll.innerHTML='<div class="muted" style="padding:12px 0">Aucune photo dans cette session.</div>';
-    return;
+  }else{
+    roll.innerHTML=data.photos.map(p=>`<div class="file"><div><div class="name">${esc(p.name)}</div><div class="size">${formatSize(p.size)}</div></div><div class="actions"><button class="secondary" onclick='showCameraPhoto(${JSON.stringify(p.name)})'>Voir</button><button class="secondary" onclick='saveCameraPhoto(${JSON.stringify(p.name)})'>Télécharger</button></div></div>`).join('');
   }
-  roll.innerHTML=data.photos.map(p=>`<div class="file"><div><div class="name">${esc(p.name)}</div><div class="size">${formatSize(p.size)}</div></div><div class="actions"><button class="secondary" onclick='showCameraPhoto(${JSON.stringify(p.name)})'>Voir</button><button class="secondary" onclick='saveCameraPhoto(${JSON.stringify(p.name)})'>Télécharger</button></div></div>`).join('');
-  const newest=data.photos[0].name;
-  if(forcePreview || newest!==latestCameraName) showCameraPhoto(newest);
+
+  const newest=data.photos.length?data.photos[0].name:'';
+  if(newest && newest!==latestCameraName){
+    showLatestCapturedPreview(newest);
+  }
+
+  if(capturePending && newest && newest!==captureBefore){
+    capturePending=false;
+    $('cameraState').textContent='Photo reçue immédiatement';
+    toast('Photo reçue sur l’iPhone');
+  }
 }
 
-async function loadCamera(force=false){
-  if(!pin) return;
+async function loadCamera(){
+  const r=await fetch('/api/camera?t='+Date.now(),{
+    headers:headers(),
+    cache:'no-store'
+  });
+  if(!r.ok) throw new Error('État Camera indisponible');
+  const data=await r.json();
+  renderCamera(data);
+  return data;
+}
+
+async function cameraPump(){
+  if(cameraPumpBusy || !$('camera').classList.contains('active') || !pin) return;
+  cameraPumpBusy=true;
   try{
-    const r=await fetch('/api/camera',{headers:headers()});
-    if(!r.ok) return;
-    renderCamera(await r.json(),force);
-  }catch(e){}
+    // Une seule file de requêtes : plus de concurrence entre flux,
+    // pellicule et attente de capture.
+    await refreshLiveCamera();
+    cameraPumpTick++;
+    if(cameraPumpTick%2===0 || capturePending) await loadCamera();
+
+    if(!capturePending){
+      $('cameraState').textContent='LIVE • liaison 3DS active';
+    }
+  }catch(e){
+    $('cameraState').textContent='Synchronisation…';
+  }finally{
+    cameraPumpBusy=false;
+  }
+}
+
+function startCameraLive(){
+  if(cameraPumpTimer) clearInterval(cameraPumpTimer);
+  cameraPumpTick=0;
+  cameraPump();
+  cameraPumpTimer=setInterval(cameraPump,200);
 }
 
 async function remoteCapture(){
   if(!pin){toast('Entre le PIN');return}
-  const before=latestCameraName;
-  $('cameraState').textContent='Capture demandée à la 3DS…';
-  const r=await fetch('/api/camera/capture',{method:'POST',headers:headers()});
-  if(!r.ok){toast('Capture refusée');return}
-  for(let i=0;i<24;i++){
-    await new Promise(resolve=>setTimeout(resolve,250));
-    try{
-      const s=await fetch('/api/camera',{headers:headers()});
-      if(!s.ok) continue;
-      const data=await s.json();
-      if(data.photos.length && data.photos[0].name!==before){
-        renderCamera(data,true); toast('Photo reçue sur l’iPhone'); return;
-      }
-    }catch(e){}
+  if(capturePending) return;
+
+  captureBefore=latestCameraName;
+  capturePending=true;
+  $('cameraState').textContent='Envoi du déclenchement…';
+
+  try{
+    const r=await fetch('/api/camera/capture',{
+      method:'POST',
+      headers:headers(),
+      cache:'no-store'
+    });
+    if(!r.ok) throw new Error('Capture refusée');
+
+    $('cameraState').textContent='Commande reçue par la 3DS…';
+    // Le pump unique détectera la nouvelle photo sans lancer 24 requêtes
+    // supplémentaires en parallèle.
+    cameraPump();
+  }catch(e){
+    capturePending=false;
+    $('cameraState').textContent=e.message;
+    toast(e.message);
   }
-  $('cameraState').textContent='La capture prend plus de temps que prévu. Appuie sur Actualiser.';
 }
 
 async function saveCameraPhoto(name){
   try{
     const blob=await fetchCameraBlob(name);
     const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); a.remove();
+    a.href=URL.createObjectURL(blob);
+    a.download=name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href),1500);
   }catch(e){toast(e.message)}
 }
 
 async function deleteCameraPhoto(name){
   if(!confirm('Supprimer cette photo de la 3DS ?')) return;
-  const r=await fetch('/api/camera/delete?name='+encodeURIComponent(name),{method:'POST',headers:headers()});
-  if(r.ok){ if(name===latestCameraName){latestCameraName='';$('cameraPreview').innerHTML=''} loadCamera(true); toast('Photo supprimée'); }
+  const r=await fetch('/api/camera/delete?name='+encodeURIComponent(name),{
+    method:'POST',
+    headers:headers()
+  });
+  if(r.ok){
+    if(name===latestCameraName){
+      latestCameraName='';
+      if(latestCameraUrl) URL.revokeObjectURL(latestCameraUrl);
+      latestCameraUrl='';
+      $('cameraPreview').innerHTML='';
+    }
+    await loadCamera();
+    toast('Photo supprimée');
+  }else{
+    toast('Suppression impossible');
+  }
 }
-
-setInterval(()=>{
-  if($('camera').classList.contains('active')) loadCamera(false);
-},550);
 
 if(pin) setTimeout(unlock,250);
 </script>
@@ -1692,9 +1800,7 @@ void handleClient(sockaddr_in& client) {
     if (cameraMode &&
         (route == "/upload" ||
          route == "/download" ||
-         route == "/delete" ||
-         route == "/camera/file" ||
-         route == "/api/camera/delete")) {
+         route == "/delete")) {
         sendSimple(
             clientSocket,
             423,
@@ -1781,12 +1887,12 @@ void handleClient(sockaddr_in& client) {
     }
 
     if (route == "/camera/live.bmp" && method == "GET") {
-        sendSimple(
-            clientSocket,
-            503,
-            "Service Unavailable",
-            "Flux video iPhone encore desactive en v0.9.1; commandes et pellicule restent actives."
-        );
+        sendLiveCameraBmp(clientSocket);
+        return;
+    }
+
+    if (route == "/camera/last-preview.bmp" && method == "GET") {
+        sendLastCapturedPreviewBmp(clientSocket);
         return;
     }
 
@@ -1813,7 +1919,20 @@ void handleClient(sockaddr_in& client) {
         const std::string name = sanitizeFilename(getQueryValue(target, "name"));
         const std::string path = std::string(CAMERA_DIR) + "/" + name;
         if (remove(path.c_str()) == 0) {
-            if (lastPhotoName == name) lastPhotoName.clear();
+            cameraSessionPhotos.erase(
+                std::remove_if(
+                    cameraSessionPhotos.begin(),
+                    cameraSessionPhotos.end(),
+                    [&](const FileEntry& entry) { return entry.name == name; }
+                ),
+                cameraSessionPhotos.end()
+            );
+            if (lastPhotoName == name) {
+                lastPhotoName = cameraSessionPhotos.empty()
+                    ? ""
+                    : cameraSessionPhotos.front().name;
+                lastCapturedFrameReady = false;
+            }
             sendSimple(clientSocket, 200, "OK", "{\"ok\":true}", "application/json");
         } else {
             sendSimple(clientSocket, 404, "Not Found", "{\"ok\":false}", "application/json");
@@ -1890,7 +2009,7 @@ void drawHomeTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.9.1", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v1.0", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1977,7 +2096,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v0.9.1", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v1.0", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
@@ -2097,8 +2216,7 @@ int main() {
         if (down & KEY_START) break;
 
         if (cameraMode) {
-            // En v0.9.1 on donne la priorité absolue au viseur 3DS :
-            // aucune requête HTTP n'est traitée pendant le mode caméra.
+            // Le moteur caméra v0.8 reste prioritaire ; le réseau est servi une requête par frame.
             if (!cameraUiPrimed) {
                 primeCameraUiBuffers();
                 cameraUiPrimed = true;
@@ -2142,13 +2260,10 @@ int main() {
                 presentCameraFrame();
             }
 
-            // Une seule petite requête réseau tous les 3 passages caméra.
-            // Les gros transferts sont refusés tant que le viseur est ouvert.
-            ++cameraNetworkDivider;
-            if (cameraNetworkDivider >= 3) {
-                cameraNetworkDivider = 0;
-                pollServer(1);
-            }
+            // Une requête au maximum par frame caméra : latence typique
+            // d'une frame (~33 ms) sans créer de rafale réseau.
+            (void)cameraNetworkDivider;
+            pollServer(1);
 
             // Aucun rendu Citro2D/Citro3D sur l'écran supérieur : le viseur v0.8
             // reste intact.
@@ -2173,8 +2288,7 @@ int main() {
             lastAction = "Nouveau code PIN genere";
         }
 
-        // Le serveur réseau tourne uniquement hors du mode caméra dans cette
-        // version de stabilisation.
+        // Hors caméra, on peut vider plusieurs requêtes en attente.
         pollServer(4);
 
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
