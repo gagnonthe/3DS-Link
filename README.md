@@ -1,40 +1,35 @@
 # 3DS Link
 
-## v0.7 — Stable 3DS Camera Preview
+## v0.8 — Camera core rebuilt from devkitPro reference
 
-Cette version se concentre uniquement sur la caméra de la 3DS.
+La v0.8 reconstruit la boucle vidéo CAMU à partir du fonctionnement de
+`devkitPro/3ds-examples/camera/video`.
 
-### Changement d'architecture
+### Pourquoi la v0.7 pouvait rester bloquée
 
-La v0.5/v0.6 faisait passer le flux caméra dans une texture Citro2D/Citro3D.
-Sur la vraie console cela provoquait encore des saccades, une mauvaise position de
-l'image, des couleurs instables et du clignotement.
+La v0.7 attendait seulement l'événement de réception d'image. L'exemple officiel
+surveille également l'interruption **buffer error** de CAMU et redémarre la
+capture lorsqu'elle se produit. Sans ce traitement, une erreur du buffer pouvait
+faire enchaîner les timeouts et laisser l'écran sur « Démarrage de la caméra ».
 
-La v0.7 supprime complètement cette étape pour le viseur.
+### v0.8
 
-Le buffer `OUTPUT_RGB_565` de CAMU est maintenant affiché directement dans le
-framebuffer RGB8 de l'écran supérieur, avec la même organisation mémoire que
-l'exemple officiel `devkitPro/3ds-examples/camera/video`.
-
-### Autres corrections
-
-- attente bloquante de la vraie frame suivante au lieu d'un simple polling à 0 ns ;
-- une nouvelle réception CAMU est armée à chaque frame ;
-- resynchronisation de la capture si une réception échoue ;
-- aucune opération réseau pendant le mode caméra ;
-- aucun rendu Citro2D/Citro3D sur l'écran supérieur pendant le direct ;
-- les deux buffers de l'écran inférieur contiennent la même interface afin
-  d'éviter son clignotement pendant les swaps ;
-- le flux direct Safari est volontairement désactivé dans cette version de test.
+- `CAMU_GetBufferErrorInterruptEvent` utilisé comme dans l'exemple officiel ;
+- `CAMU_SetReceiving` réarmé après chaque frame ;
+- attente simultanée de l'événement d'erreur et de l'événement de réception ;
+- reprise de `CAMU_StartCapture` après une interruption ;
+- timeout = resynchronisation, jamais une attente infinie ;
+- buffer caméra alloué avec `malloc`, comme l'exemple de référence ;
+- caméra extérieure en 400×240 RGB565 à 30 fps ;
+- copie directe du RGB565 vers le framebuffer RGB8 du top screen ;
+- double buffering du haut activé ;
+- écran inférieur figé pendant la caméra pour ne pas perturber la boucle vidéo ;
+- serveur/streaming iPhone toujours désactivé en mode Camera pour ce test.
 
 ### Test attendu
 
-1. Ouvre Camera Link avec `Y`.
-2. Bouge lentement la 3DS.
-3. L'image doit suivre continuellement, sans rester bloquée sur la première frame.
-4. Elle doit occuper toujours exactement les 400×240 pixels de l'écran supérieur.
-5. Il ne doit plus y avoir de clignotement causé par Citro2D.
-6. Après 1 à 2 secondes, teste une photo avec `A`.
+L'ouverture de Camera Link ne doit plus prendre une minute.
+La première image devrait apparaître rapidement, puis suivre le mouvement de la
+console continuellement.
 
-Une fois ce viseur confirmé stable sur une vraie console, le streaming iPhone
-sera réintroduit séparément afin de ne pas dégrader la boucle caméra.
+Cette version doit être validée sur la vraie 3DS avant de réintroduire le direct iPhone.

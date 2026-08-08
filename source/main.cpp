@@ -85,10 +85,11 @@ std::string cameraStatus = "Pret a prendre une photo";
 bool cameraActive = false;
 bool cameraHasFrame = false;
 Handle cameraReceiveEvent = 0;
+Handle cameraErrorEvent = 0;
 u32 cameraTransferBytes = 0;
+u8* cameraRawBuffer = nullptr;
+bool cameraCaptureInterrupted = false;
 unsigned int cameraWarmupFrames = 0;
-std::vector<u8> cameraFrame(CAMERA_FRAME_BYTES);
-std::vector<u8> cameraReceiveBuffer(CAMERA_FRAME_BYTES);
 
 
 C3D_RenderTarget* topTarget = nullptr;
@@ -406,6 +407,11 @@ void stopCameraStream() {
         cameraReceiveEvent = 0;
     }
 
+    if (cameraErrorEvent) {
+        svcCloseHandle(cameraErrorEvent);
+        cameraErrorEvent = 0;
+    }
+
     if (cameraActive) {
         CAMU_StopCapture(PORT_CAM1);
         CAMU_Activate(SELECT_NONE);
@@ -413,6 +419,12 @@ void stopCameraStream() {
         cameraActive = false;
     }
 
+    if (cameraRawBuffer) {
+        free(cameraRawBuffer);
+        cameraRawBuffer = nullptr;
+    }
+
+    cameraCaptureInterrupted = false;
     cameraHasFrame = false;
     cameraWarmupFrames = 0;
 }
@@ -420,158 +432,211 @@ void stopCameraStream() {
 bool startCameraStream() {
     if (cameraActive) return true;
 
-    cameraStatus = "Demarrage du viseur...";
+    cameraStatus = "Initialisation CAMU...";
 
-    const Result initResult = camInit();
-    if (R_FAILED(initResult)) {
-        cameraStatus = "Impossible d'initialiser la camera";
+    if (!cameraRawBuffer) {
+        // Même stratégie d'allocation que l'exemple officiel devkitPro.
+        cameraRawBuffer = static_cast<u8*>(malloc(CAMERA_FRAME_BYTES));
+        if (!cameraRawBuffer) {
+            cameraStatus = "Memoire camera insuffisante";
+            return false;
+        }
+        memset(cameraRawBuffer, 0, CAMERA_FRAME_BYTES);
+    }
+
+    Result result = camInit();
+    if (R_FAILED(result)) {
+        cameraStatus = "camInit a echoue";
+        free(cameraRawBuffer);
+        cameraRawBuffer = nullptr;
         return false;
     }
 
     bool ok = true;
 
+    // Configuration volontairement proche de camera/video de devkitPro.
     if (R_FAILED(CAMU_SetSize(SELECT_OUT1, SIZE_CTR_TOP_LCD, CONTEXT_A))) ok = false;
     if (ok && R_FAILED(CAMU_SetOutputFormat(SELECT_OUT1, OUTPUT_RGB_565, CONTEXT_A))) ok = false;
-    if (ok) CAMU_SetFrameRate(SELECT_OUT1, FRAME_RATE_15_TO_5);
-    if (ok) CAMU_SetPhotoMode(SELECT_OUT1, PHOTO_MODE_NORMAL);
-    if (ok) CAMU_SetContrast(SELECT_OUT1, CONTRAST_NORMAL);
-    if (ok) CAMU_SetLensCorrection(SELECT_OUT1, LENS_CORRECTION_BRIGHT);
-    if (ok) CAMU_SetNoiseFilter(SELECT_OUT1, true);
-    if (ok) CAMU_SetAutoExposure(SELECT_OUT1, true);
-    if (ok) CAMU_SetAutoWhiteBalance(SELECT_OUT1, true);
-    if (ok) CAMU_SetTrimming(PORT_CAM1, false);
-    if (ok && R_FAILED(CAMU_GetMaxBytes(&cameraTransferBytes, CAMERA_WIDTH, CAMERA_HEIGHT))) ok = false;
+    if (ok && R_FAILED(CAMU_SetFrameRate(SELECT_OUT1, FRAME_RATE_30))) ok = false;
+    if (ok && R_FAILED(CAMU_SetNoiseFilter(SELECT_OUT1, true))) ok = false;
+    if (ok && R_FAILED(CAMU_SetAutoExposure(SELECT_OUT1, true))) ok = false;
+    if (ok && R_FAILED(CAMU_SetAutoWhiteBalance(SELECT_OUT1, true))) ok = false;
+    if (ok && R_FAILED(CAMU_SetTrimming(PORT_CAM1, false))) ok = false;
+
+    if (ok && R_FAILED(CAMU_GetMaxBytes(
+        &cameraTransferBytes,
+        CAMERA_WIDTH,
+        CAMERA_HEIGHT
+    ))) ok = false;
+
     if (ok && R_FAILED(CAMU_SetTransferBytes(
         PORT_CAM1,
         cameraTransferBytes,
         CAMERA_WIDTH,
         CAMERA_HEIGHT
     ))) ok = false;
+
     if (ok && R_FAILED(CAMU_Activate(SELECT_OUT1))) ok = false;
 
-    if (ok) {
-        CAMU_ClearBuffer(PORT_CAM1);
-        if (R_FAILED(CAMU_StartCapture(PORT_CAM1))) ok = false;
-    }
+    // L'exemple officiel surveille cet événement : c'était absent de notre
+    // première tentative de boucle native.
+    if (ok && R_FAILED(CAMU_GetBufferErrorInterruptEvent(
+        &cameraErrorEvent,
+        PORT_CAM1
+    ))) ok = false;
+
+    if (ok && R_FAILED(CAMU_ClearBuffer(PORT_CAM1))) ok = false;
+    if (ok && R_FAILED(CAMU_StartCapture(PORT_CAM1))) ok = false;
 
     if (!ok) {
+        if (cameraErrorEvent) {
+            svcCloseHandle(cameraErrorEvent);
+            cameraErrorEvent = 0;
+        }
+        CAMU_StopCapture(PORT_CAM1);
         CAMU_Activate(SELECT_NONE);
         camExit();
-        cameraStatus = "Echec du demarrage camera";
+        free(cameraRawBuffer);
+        cameraRawBuffer = nullptr;
+        cameraStatus = "Configuration CAMU echouee";
         return false;
     }
 
     cameraActive = true;
+    cameraCaptureInterrupted = false;
     cameraHasFrame = false;
     cameraWarmupFrames = 0;
-    cameraStatus = "Reglage exposition / balance des blancs...";
+    cameraStatus = "Camera active - attente premiere frame";
     return true;
 }
 
-
 bool receiveCameraFrame() {
-    if (!cameraActive) return false;
+    if (!cameraActive || !cameraRawBuffer) return false;
 
-    if (cameraReceiveEvent) {
-        svcCloseHandle(cameraReceiveEvent);
-        cameraReceiveEvent = 0;
+    // Après une interruption de buffer, l'exemple officiel relance la capture
+    // avant de continuer.
+    if (cameraCaptureInterrupted) {
+        CAMU_ClearBuffer(PORT_CAM1);
+        const Result restart = CAMU_StartCapture(PORT_CAM1);
+        if (R_FAILED(restart)) {
+            cameraStatus = "Impossible de relancer la capture";
+            return false;
+        }
+        cameraCaptureInterrupted = false;
     }
 
-    const Result receiveResult = CAMU_SetReceiving(
-        &cameraReceiveEvent,
-        cameraReceiveBuffer.data(),
-        PORT_CAM1,
-        CAMERA_FRAME_BYTES,
-        static_cast<s16>(cameraTransferBytes)
+    if (cameraReceiveEvent == 0) {
+        const Result receive = CAMU_SetReceiving(
+            &cameraReceiveEvent,
+            cameraRawBuffer,
+            PORT_CAM1,
+            CAMERA_FRAME_BYTES,
+            static_cast<s16>(cameraTransferBytes)
+        );
+
+        if (R_FAILED(receive)) {
+            cameraStatus = "CAMU_SetReceiving a echoue";
+            return false;
+        }
+    }
+
+    Handle events[2] = { cameraErrorEvent, cameraReceiveEvent };
+    s32 index = -1;
+
+    const Result wait = svcWaitSynchronizationN(
+        &index,
+        events,
+        2,
+        false,
+        CAMERA_WAIT_TIMEOUT
     );
 
-    if (R_FAILED(receiveResult)) {
-        cameraStatus = "Erreur reception camera";
+    if (R_FAILED(wait)) {
+        // Ne pas rester bloqué pendant des minutes. On force une vraie
+        // resynchronisation de la caméra.
+        if (cameraReceiveEvent) {
+            svcCloseHandle(cameraReceiveEvent);
+            cameraReceiveEvent = 0;
+        }
+        CAMU_StopCapture(PORT_CAM1);
+        CAMU_ClearBuffer(PORT_CAM1);
+        cameraCaptureInterrupted = true;
+        cameraStatus = "Timeout camera - resynchronisation";
         return false;
     }
 
-    // On attend réellement la prochaine frame au lieu de tester l'event une seule
-    // fois par boucle. C'est le modèle utilisé par l'exemple vidéo officiel.
-    const Result waitResult = svcWaitSynchronization(
-        cameraReceiveEvent,
-        CAMERA_WAIT_TIMEOUT
-    );
+    if (index == 0) {
+        // Buffer error interrupt : exactement le cas que l'exemple officiel
+        // traite avant de continuer.
+        if (cameraReceiveEvent) {
+            svcCloseHandle(cameraReceiveEvent);
+            cameraReceiveEvent = 0;
+        }
+        CAMU_StopCapture(PORT_CAM1);
+        cameraCaptureInterrupted = true;
+        cameraStatus = "Buffer camera resynchronise";
+        return false;
+    }
+
+    if (index != 1) {
+        cameraStatus = "Evenement camera inattendu";
+        return false;
+    }
 
     svcCloseHandle(cameraReceiveEvent);
     cameraReceiveEvent = 0;
 
-    if (R_FAILED(waitResult)) {
-        CAMU_StopCapture(PORT_CAM1);
-        CAMU_ClearBuffer(PORT_CAM1);
-        CAMU_StartCapture(PORT_CAM1);
-        cameraStatus = "Resynchronisation camera...";
-        return false;
-    }
-
-    cameraFrame.swap(cameraReceiveBuffer);
     cameraHasFrame = true;
     ++cameraWarmupFrames;
 
-    if (cameraWarmupFrames < 8) {
-        cameraStatus = "Reglage exposition / balance des blancs...";
+    if (cameraWarmupFrames < 5) {
+        cameraStatus = "Reglage exposition / couleurs...";
     } else {
-        cameraStatus = "LIVE - pret a prendre une photo";
+        cameraStatus = "LIVE";
     }
 
     return true;
 }
 
-// Affichage basé directement sur l'exemple devkitPro camera/video.
-// Le framebuffer 3DS est en RGB8 et organisé en colonnes, pas comme une image
-// classique rangée ligne par ligne.
+// Copie volontairement proche de writePictureToFramebufferRGB565()
+// de l'exemple officiel devkitPro camera/video.
 void writeCameraFrameToTopFramebuffer(const u8* image) {
     if (!image) return;
 
-    u16 fbWidth = 0;
-    u16 fbHeight = 0;
     u8* framebuffer = gfxGetFramebuffer(
         GFX_TOP,
         GFX_LEFT,
-        &fbWidth,
-        &fbHeight
+        nullptr,
+        nullptr
     );
 
-    if (!framebuffer || fbWidth < CAMERA_WIDTH || fbHeight < CAMERA_HEIGHT) {
-        return;
-    }
+    if (!framebuffer) return;
 
     const u16* pixels = reinterpret_cast<const u16*>(image);
 
-    for (int y = 0; y < CAMERA_HEIGHT; ++y) {
-        const int drawY = CAMERA_HEIGHT - 1 - y;
+    for (int j = 0; j < CAMERA_HEIGHT; ++j) {
+        for (int i = 0; i < CAMERA_WIDTH; ++i) {
+            const int drawY = CAMERA_HEIGHT - 1 - j;
+            const int drawX = i;
 
-        for (int x = 0; x < CAMERA_WIDTH; ++x) {
-            const u16 data = pixels[y * CAMERA_WIDTH + x];
-
-            // Disposition RGB565 confirmée par l'exemple officiel devkitPro :
-            // R = bits 0..4, G = 5..10, B = 11..15.
-            const u8 r = static_cast<u8>(((data      ) & 0x1F) << 3);
-            const u8 g = static_cast<u8>(((data >>  5) & 0x3F) << 2);
-            const u8 b = static_cast<u8>(((data >> 11) & 0x1F) << 3);
-
-            const size_t offset =
+            const size_t v =
                 (static_cast<size_t>(drawY) +
-                 static_cast<size_t>(x) * CAMERA_HEIGHT) * 3;
+                 static_cast<size_t>(drawX) * CAMERA_HEIGHT) * 3;
 
-            framebuffer[offset + 0] = r;
-            framebuffer[offset + 1] = g;
-            framebuffer[offset + 2] = b;
+            const u16 data = pixels[j * CAMERA_WIDTH + i];
+
+            framebuffer[v + 0] = static_cast<u8>((data & 0x1F) << 3);
+            framebuffer[v + 1] = static_cast<u8>(((data >> 5) & 0x3F) << 2);
+            framebuffer[v + 2] = static_cast<u8>(((data >> 11) & 0x1F) << 3);
         }
     }
 }
 
 void presentCameraFrame() {
-    if (!cameraHasFrame) return;
+    if (!cameraHasFrame || !cameraRawBuffer) return;
 
-    writeCameraFrameToTopFramebuffer(cameraFrame.data());
+    writeCameraFrameToTopFramebuffer(cameraRawBuffer);
 
-    // En mode caméra, seul l'écran du haut change. Les deux buffers du bas ont
-    // été préremplis avec la même interface, ce qui empêche tout clignotement.
     gfxFlushBuffers();
     gspWaitForVBlank();
     gfxSwapBuffers();
@@ -606,7 +671,7 @@ bool captureCameraPhoto() {
     const std::string name = makeCameraFilename();
     const std::string path = std::string(CAMERA_DIR) + "/" + name;
 
-    if (!saveCameraBmp(path, cameraFrame.data())) {
+    if (!saveCameraBmp(path, cameraRawBuffer)) {
         cameraStatus = "Erreur d'ecriture sur la carte SD";
         lastAction = "Camera : erreur SD";
         return false;
@@ -621,7 +686,7 @@ bool captureCameraPhoto() {
 }
 
 bool sendLiveCameraBmp(int sock) {
-    if (!cameraHasFrame) {
+    if (!cameraHasFrame || !cameraRawBuffer) {
         sendSimple(sock, 503, "Service Unavailable", "Camera pas encore prete");
         return false;
     }
@@ -677,7 +742,7 @@ bool sendLiveCameraBmp(int sock) {
         return false;
     }
 
-    const u16* pixels = reinterpret_cast<const u16*>(cameraFrame.data());
+    const u16* pixels = reinterpret_cast<const u16*>(cameraRawBuffer);
     std::vector<u8> row(stride, 0);
 
     for (int y = CAMERA_HEIGHT - 1; y >= 0; --y) {
@@ -1037,7 +1102,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.7</div>
+    <div class="small">v0.8</div>
   </div>
 </header>
 
@@ -1120,10 +1185,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.7 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v0.8 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.7 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.8 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1695,7 +1760,7 @@ void handleClient(sockaddr_in& client) {
             clientSocket,
             503,
             "Service Unavailable",
-            "Flux iPhone temporairement desactive en v0.7 pendant la stabilisation du viseur 3DS"
+            "Flux iPhone temporairement desactive en v0.8 pendant la stabilisation du viseur 3DS"
         );
         return;
     }
@@ -1796,7 +1861,7 @@ void drawHomeTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.7", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.8", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1883,7 +1948,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v0.7", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v0.8", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
@@ -1993,7 +2058,7 @@ int main() {
         if (down & KEY_START) break;
 
         if (cameraMode) {
-            // En v0.7 on donne la priorité absolue au viseur 3DS :
+            // En v0.8 on donne la priorité absolue au viseur 3DS :
             // aucune requête HTTP n'est traitée pendant le mode caméra.
             if (!cameraUiPrimed) {
                 primeCameraUiBuffers();
@@ -2012,6 +2077,8 @@ int main() {
                 cameraMode = false;
                 cameraUiPrimed = false;
                 stopCameraStream();
+                gfxSetDoubleBuffering(GFX_TOP, true);
+                gfxSetDoubleBuffering(GFX_BOTTOM, true);
                 cameraStatus = "Pret a prendre une photo";
                 continue;
             }
@@ -2021,7 +2088,7 @@ int main() {
             }
 
             if (receiveCameraFrame()) {
-                if (cameraCaptureRequested && cameraWarmupFrames >= 8) {
+                if (cameraCaptureRequested && cameraWarmupFrames >= 5) {
                     cameraCaptureRequested = false;
                     captureCameraPhoto();
                 }
@@ -2042,6 +2109,8 @@ int main() {
             cameraMode = true;
             cameraCaptureRequested = false;
             cameraStatus = "Demarrage du viseur...";
+            gfxSetDoubleBuffering(GFX_TOP, true);
+            gfxSetDoubleBuffering(GFX_BOTTOM, false);
             continue;
         }
 
