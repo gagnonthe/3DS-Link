@@ -1,38 +1,36 @@
 # 3DS Link
 
-## v0.5 — Live Camera
+## v0.6 — Camera pipeline fix
 
-Cette version transforme Camera Link en véritable viseur connecté.
+Cette version corrige le pipeline caméra après les problèmes observés sur la vraie console.
 
-### Nouveautés
+### Ce qui a été corrigé
 
-- caméra extérieure maintenue active tant que le mode Camera est ouvert ;
-- aperçu vidéo réel sur l'écran supérieur de la 3DS ;
-- flux quasi temps réel vers Safari sur l'iPhone ;
-- Safari récupère une nouvelle image environ toutes les 420 ms ;
-- prise de photo depuis la 3DS ou depuis l'iPhone ;
-- plusieurs photos successives sans réinitialiser la caméra ;
-- couleurs RGB565 corrigées avec conversion 5/6 bits complète vers 8 bits ;
-- l'exposition et la balance des blancs ont le temps de se stabiliser avant une photo ;
-- photos BMP 400×240 enregistrées dans `sdmc:/3ds/3DS-Link/camera/` ;
-- pellicule, téléchargement et suppression toujours disponibles.
+- l'aperçu 3DS n'envoie plus une image RGBA linéaire directement à `C3D_TexUpload` ;
+- le buffer caméra RGB565 est maintenant converti vers la disposition **tuilée 8×8 Morton** attendue par le GPU PICA200 ;
+- le viseur utilise directement une texture `GPU_RGB565`, ce qui évite une conversion couleur inutile pour l'écran 3DS ;
+- la conversion RGB565 → BMP garde l'ordre de composantes utilisé par l'exemple caméra officiel devkitPro ;
+- le mode caméra passe sur une fréquence adaptative `15_TO_5`, plus adaptée lorsque la lumière est faible ;
+- mode photo, contraste et correction de lentille sont explicitement initialisés ;
+- la caméra attend davantage de frames avant d'autoriser une photo afin de laisser l'exposition et la balance des blancs se stabiliser ;
+- le flux iPhone et les BMP continuent d'utiliser le même frame source que le viseur.
 
-### Utilisation
+### Pourquoi les bandes rouges apparaissaient
 
-1. Lance 3DS Link.
-2. Scanne le QR code et entre le PIN.
-3. Ouvre l'onglet **Camera** sur l'iPhone, ou appuie sur `Y` sur la 3DS.
-4. Attends que l'indicateur passe sur **LIVE**.
-5. Appuie sur `A`, le déclencheur tactile, ou **Prendre une photo** sur l'iPhone.
+Citro3D/PICA200 ne lit pas une texture dynamique comme un tableau classique rangé ligne par ligne.
+La v0.5 envoyait pourtant notre buffer RGBA8 linéaire directement à `C3D_TexUpload`.
+Le GPU interprétait alors ces octets comme des tuiles 8×8, d'où les motifs verticaux répétitifs.
 
-### Remarque technique
+### Référence
 
-Le flux iPhone utilise des instantanés BMP successifs plutôt qu'un encodage H.264. C'est volontaire : la 3DS peut ainsi afficher le viseur et transmettre les images sans ajouter un encodeur vidéo lourd.
+La logique de capture et l'ordre RGB565 suivent l'exemple officiel
+`devkitPro/3ds-examples/camera/video`.
 
-### Commandes
+### Test conseillé
 
-- `Y` : ouvrir/fermer Camera Link
-- `A` : prendre une photo en mode Camera
-- `B` : revenir à l'accueil
-- `X` : nouveau PIN sur l'accueil
-- `START` : quitter
+1. Ouvre Camera Link.
+2. Attends environ 1 à 2 secondes.
+3. Vérifie le viseur de la 3DS.
+4. Vérifie ensuite le flux sur l'iPhone.
+5. Prends une photo d'un objet avec plusieurs couleurs faciles à reconnaître.
+6. Compare viseur 3DS, flux Safari et BMP téléchargé.

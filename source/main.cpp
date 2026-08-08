@@ -95,7 +95,7 @@ C3D_Tex cameraTexture{};
 Tex3DS_SubTexture cameraSubTexture{};
 C2D_Image cameraImage{};
 bool cameraTextureReady = false;
-std::vector<u8> cameraTextureBuffer(512 * 256 * 4, 0);
+std::vector<u16> cameraTextureBuffer(512 * 256, 0);
 
 C3D_RenderTarget* topTarget = nullptr;
 C3D_RenderTarget* bottomTarget = nullptr;
@@ -438,7 +438,10 @@ bool startCameraStream() {
 
     if (R_FAILED(CAMU_SetSize(SELECT_OUT1, SIZE_CTR_TOP_LCD, CONTEXT_A))) ok = false;
     if (ok && R_FAILED(CAMU_SetOutputFormat(SELECT_OUT1, OUTPUT_RGB_565, CONTEXT_A))) ok = false;
-    if (ok) CAMU_SetFrameRate(SELECT_OUT1, FRAME_RATE_15);
+    if (ok) CAMU_SetFrameRate(SELECT_OUT1, FRAME_RATE_15_TO_5);
+    if (ok) CAMU_SetPhotoMode(SELECT_OUT1, PHOTO_MODE_NORMAL);
+    if (ok) CAMU_SetContrast(SELECT_OUT1, CONTRAST_NORMAL);
+    if (ok) CAMU_SetLensCorrection(SELECT_OUT1, LENS_CORRECTION_BRIGHT);
     if (ok) CAMU_SetNoiseFilter(SELECT_OUT1, true);
     if (ok) CAMU_SetAutoExposure(SELECT_OUT1, true);
     if (ok) CAMU_SetAutoWhiteBalance(SELECT_OUT1, true);
@@ -467,14 +470,14 @@ bool startCameraStream() {
     cameraActive = true;
     cameraHasFrame = false;
     cameraWarmupFrames = 0;
-    cameraStatus = "Reglage exposition et couleurs...";
+    cameraStatus = "Reglage exposition / balance des blancs...";
     return true;
 }
 
 bool initCameraTexture() {
     if (cameraTextureReady) return true;
 
-    if (!C3D_TexInit(&cameraTexture, 512, 256, GPU_RGBA8)) {
+    if (!C3D_TexInit(&cameraTexture, 512, 256, GPU_RGB565)) {
         cameraStatus = "Texture camera indisponible";
         return false;
     }
@@ -496,23 +499,43 @@ bool initCameraTexture() {
     return true;
 }
 
+static inline unsigned int morton8x8(unsigned int x, unsigned int y) {
+    static const unsigned int xLut[8] = {0, 1, 4, 5, 16, 17, 20, 21};
+    static const unsigned int yLut[8] = {0, 2, 8, 10, 32, 34, 40, 42};
+    return xLut[x & 7] + yLut[y & 7];
+}
+
+static inline size_t tiledTextureIndex(unsigned int x, unsigned int y, unsigned int width) {
+    const unsigned int tileX = x & ~7u;
+    const unsigned int tileY = y & ~7u;
+    return static_cast<size_t>(tileY) * width +
+           static_cast<size_t>(tileX) * 8u +
+           morton8x8(x, y);
+}
+
 void updateCameraTexture() {
     if (!cameraHasFrame || !initCameraTexture()) return;
 
     std::fill(cameraTextureBuffer.begin(), cameraTextureBuffer.end(), 0);
 
+    // IMPORTANT :
+    // C3D_TexUpload attend la disposition tuilée (8x8 Morton) native du PICA200.
+    // La v0.5 lui envoyait des pixels linéaires : c'est la cause des bandes rouges
+    // répétées visibles sur l'écran supérieur.
+    //
+    // La caméra fournit déjà du RGB565 natif : aucun aller-retour en RGBA8 n'est
+    // nécessaire pour l'aperçu 3DS. On conserve donc exactement les 16 bits CAMU.
     const u16* pixels = reinterpret_cast<const u16*>(cameraFrame.data());
 
-    for (int y = 0; y < CAMERA_HEIGHT; ++y) {
-        for (int x = 0; x < CAMERA_WIDTH; ++x) {
-            u8 r, g, b;
-            unpackCameraPixel(pixels[y * CAMERA_WIDTH + x], r, g, b);
+    constexpr unsigned int textureWidth = 512;
+    constexpr unsigned int textureHeight = 256;
+    constexpr unsigned int yOffset = textureHeight - CAMERA_HEIGHT; // 16 lignes
 
-            const size_t dst = (static_cast<size_t>(y) * 512 + x) * 4;
-            cameraTextureBuffer[dst + 0] = r;
-            cameraTextureBuffer[dst + 1] = g;
-            cameraTextureBuffer[dst + 2] = b;
-            cameraTextureBuffer[dst + 3] = 255;
+    for (unsigned int y = 0; y < CAMERA_HEIGHT; ++y) {
+        for (unsigned int x = 0; x < CAMERA_WIDTH; ++x) {
+            const unsigned int texY = y + yOffset;
+            const size_t dst = tiledTextureIndex(x, texY, textureWidth);
+            cameraTextureBuffer[dst] = pixels[y * CAMERA_WIDTH + x];
         }
     }
 
@@ -549,8 +572,8 @@ void pollCameraFrame() {
 
         updateCameraTexture();
 
-        if (cameraWarmupFrames < 4) {
-            cameraStatus = "Reglage exposition et couleurs...";
+        if (cameraWarmupFrames < 8) {
+            cameraStatus = "Reglage exposition / balance des blancs...";
         } else {
             cameraStatus = "LIVE - pret a prendre une photo";
         }
@@ -577,7 +600,7 @@ bool captureCameraPhoto() {
         return false;
     }
 
-    if (!cameraHasFrame || cameraWarmupFrames < 3) {
+    if (!cameraHasFrame || cameraWarmupFrames < 8) {
         cameraStatus = "Attends une seconde : reglage des couleurs...";
         return false;
     }
@@ -1017,7 +1040,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.5</div>
+    <div class="small">v0.6</div>
   </div>
 </header>
 
@@ -1100,10 +1123,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.5 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v0.6 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.5 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.6 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1264,7 +1287,7 @@ async function refreshLiveCamera(){
 
     if(liveCameraObjectUrl) URL.revokeObjectURL(liveCameraObjectUrl);
     liveCameraObjectUrl=next;
-    $('cameraState').textContent='Flux direct actif • couleurs stabilisées par la caméra 3DS';
+    $('cameraState').textContent='Flux direct actif • exposition automatique 3DS';
   }catch(e){
     $('cameraState').textContent='Flux temporairement indisponible';
   }
@@ -1776,7 +1799,7 @@ void drawHomeTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.5", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.6", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1882,7 +1905,7 @@ void drawCameraTopScreen() {
     C2D_DrawRectSolid(0, 207, 0.70f, 400, 33, C2D_Color32(0, 0, 0, 155));
 
     drawText("Camera Link", 12, 5, 0.52f, COLOR_WHITE);
-    drawText("v0.5", 352, 7, 0.32f, C2D_Color32(220, 226, 230, 255));
+    drawText("v0.6", 352, 7, 0.32f, C2D_Color32(220, 226, 230, 255));
 
     C2D_DrawCircleSolid(
         312,
