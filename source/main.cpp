@@ -81,6 +81,18 @@ bool cameraCaptureRequested = false;
 unsigned int cameraPhotoCount = 0;
 std::string lastPhotoName = "";
 std::string cameraStatus = "Pret a prendre une photo";
+int homeSelection = 0;
+constexpr int HOME_ITEM_COUNT = 5;
+const char* HOME_NAMES[HOME_ITEM_COUNT] = {
+    "Fichiers", "Clavier", "Remote", "Camera Link", "Infos"
+};
+const char* HOME_DESCRIPTIONS[HOME_ITEM_COUNT] = {
+    "Echange de fichiers avec l'iPhone",
+    "Saisie rapide depuis l'iPhone",
+    "Telecommande de 3DS Link",
+    "Appareil photo et transfert",
+    "Etat de la connexion locale"
+};
 
 bool cameraActive = false;
 bool cameraHasFrame = false;
@@ -1192,6 +1204,23 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 20px
 .lock{color:#a2631e}
 #liveCamera{box-shadow:inset 0 0 0 1px #ffffff16}
 @media(max-width:420px){.actions{flex-direction:column}.file{grid-template-columns:1fr auto}#liveCamera{min-height:180px}}
+
+/* 3DS Link Companion — inspiration TWiLight Menu++ 3DS UI */
+body{
+  background:#e7ece8;
+  background-image:linear-gradient(rgba(255,255,255,.24) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.18) 1px,transparent 1px);
+  background-size:12px 12px
+}
+header{background:#f7f9f6;border-bottom:1px solid #b8c1bc;backdrop-filter:none;-webkit-backdrop-filter:none}
+.status,.panel{background:#f9faf8;border:1px solid #bfc8c3;box-shadow:0 3px 0 #cdd4d0;border-radius:13px;backdrop-filter:none}
+.tabs{background:#f4f6f3;border:1px solid #aeb9b3;border-radius:13px;box-shadow:0 4px 0 #c1c9c5;backdrop-filter:none;-webkit-backdrop-filter:none}
+.tab{border-radius:9px;color:#56645d}
+.tab.active{background:#fff;border:2px solid #f0c83e;color:#25332c;box-shadow:0 0 0 2px #fff inset}
+button{background:linear-gradient(#63b9e9,#3e99d0);border:1px solid #3185ba;border-radius:9px;box-shadow:inset 0 1px #bce6fa,0 2px 0 #bad0da}
+button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3bd;color:#33463c}
+.appicon{background:#4ba8dc;border-radius:9px;box-shadow:inset 0 1px #b9e5f7,0 2px 0 #afc7d0}
+#liveBadge{border:2px solid white}
 </style>
 </head>
 <body>
@@ -1199,9 +1228,9 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 20px
   <div class="wrap headrow">
     <div class="brand">
       <div class="appicon">3</div>
-      <div><h1>3DS Link</h1><div class="small">Nintendo 3DS • Local Link</div></div>
+      <div><h1>3DS Link</h1><div class="small">TWiLight-style Companion • Local Link</div></div>
     </div>
-    <div class="small">v1.1</div>
+    <div class="small">v1.2</div>
   </div>
 </header>
 
@@ -1284,10 +1313,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 20px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v1.1 harmonise l’interface 3DS/iPhone et corrige la colorimétrie du flux caméra.</p>
+    <p class="muted">La v1.2 harmonise l’interface 3DS/iPhone et corrige la colorimétrie du flux caméra.</p>
   </section>
 
-  <footer>3DS Link v1.1 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v1.2 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -2079,95 +2108,142 @@ void pollServer(int maxClients = 3) {
     }
 }
 
-void drawHomeTopScreen() {
-    C2D_TargetClear(topTarget, COLOR_BG_TOP);
-    C2D_SceneBegin(topTarget);
 
-    C2D_DrawRectSolid(0, 0, 0.1f, 400, 43, C2D_Color32(28, 44, 56, 255));
-    C2D_DrawRectSolid(0, 0, 0.2f, 400, 3, C2D_Color32(81, 190, 240, 255));
-    C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
+u32 twilightTileColor(int index) {
+    static const u32 colors[HOME_ITEM_COUNT] = {
+        C2D_Color32(75, 170, 226, 255),
+        C2D_Color32(244, 190, 71, 255),
+        C2D_Color32(102, 191, 126, 255),
+        C2D_Color32(227, 100, 109, 255),
+        C2D_Color32(154, 126, 205, 255)
+    };
+    return colors[index % HOME_ITEM_COUNT];
+}
 
-    drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v1.1", 348, 11, 0.40f, COLOR_WHITE);
-
-    // QR code : grande zone blanche avec quiet-zone standard.
-    drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
-    drawRoundedRect(9, 51, 164, 174, 14, COLOR_WHITE, 0.2f);
-    drawCenteredText("Scanner avec l'iPhone", 91, 60, 0.37f, COLOR_TEXT);
-
-    if (serverReady && qrReady) {
-        drawConnectionQr(91, 151, 148.0f);
+void drawTwilightIconGlyph(int index, float cx, float cy, u32 fg) {
+    // Petits pictogrammes géométriques originaux, sans reprendre d'asset Nintendo.
+    if (index == 0) {
+        C2D_DrawRectSolid(cx - 12, cy - 7, 0.7f, 24, 16, fg);
+        C2D_DrawRectSolid(cx - 8, cy - 11, 0.71f, 12, 5, fg);
+    } else if (index == 1) {
+        for (int y = 0; y < 3; ++y)
+            for (int x = 0; x < 4; ++x)
+                C2D_DrawRectSolid(cx - 14 + x * 8, cy - 9 + y * 8, 0.7f, 5, 5, fg);
+    } else if (index == 2) {
+        C2D_DrawCircleSolid(cx, cy, 0.7f, 14, fg);
+        C2D_DrawCircleSolid(cx, cy, 0.71f, 8, C2D_Color32(255,255,255,255));
+        C2D_DrawCircleSolid(cx, cy, 0.72f, 4, fg);
+    } else if (index == 3) {
+        drawRoundedRect(cx - 15, cy - 10, 30, 20, 4, fg, 0.7f);
+        C2D_DrawCircleSolid(cx, cy, 0.72f, 6, C2D_Color32(255,255,255,255));
+        C2D_DrawRectSolid(cx - 8, cy - 14, 0.71f, 10, 5, fg);
     } else {
-        drawCenteredText("QR indisponible", 91, 142, 0.42f, COLOR_RED);
-    }
-
-    // Etat du serveur.
-    drawRoundedRect(190, 54, 198, 74, 14, COLOR_SHADOW, 0.15f);
-    drawRoundedRect(187, 51, 198, 74, 14, COLOR_WHITE, 0.2f);
-
-    C2D_DrawCircleSolid(
-        210,
-        77,
-        0.5f,
-        8,
-        serverReady ? COLOR_GREEN : COLOR_RED
-    );
-
-    drawText(
-        serverReady ? "Serveur actif" : "Serveur indisponible",
-        228,
-        65,
-        0.47f,
-        COLOR_TEXT
-    );
-    drawText(statusMessage.substr(0, 25), 202, 96, 0.32f, COLOR_MUTED);
-
-    // URL et code PIN.
-    drawRoundedRect(190, 142, 198, 86, 14, COLOR_SHADOW, 0.15f);
-    drawRoundedRect(187, 139, 198, 86, 14, COLOR_WHITE, 0.2f);
-    drawText("Adresse locale", 201, 151, 0.38f, COLOR_MUTED);
-
-    if (serverReady) {
-        drawText("http://" + localIp, 201, 174, 0.36f, COLOR_BLUE_DARK);
-        drawText(":" + std::to_string(PORT), 201, 193, 0.36f, COLOR_BLUE_DARK);
-        drawText("PIN", 292, 193, 0.34f, COLOR_MUTED);
-        drawText(std::to_string(pinCode), 320, 188, 0.53f, COLOR_ORANGE);
-    } else {
-        drawText("A : reessayer", 201, 181, 0.39f, COLOR_BLUE_DARK);
+        C2D_DrawCircleSolid(cx, cy, 0.7f, 14, fg);
+        drawCenteredText("i", cx, cy - 11, 0.50f, C2D_Color32(255,255,255,255));
     }
 }
 
-void drawHomeBottomScreen() {
-    C2D_TargetClear(bottomTarget, COLOR_BG_BOTTOM);
-    C2D_SceneBegin(bottomTarget);
+void drawTwilightTile(int index, float x, float y, bool selected) {
+    const float w = 52.0f;
+    const float h = 52.0f;
 
-    C2D_DrawRectSolid(0, 0, 0.1f, 320, 34, C2D_Color32(28, 44, 56, 255));
-    drawText("3DS Link  •  iPhone", 13, 7, 0.50f, COLOR_WHITE);
-
-    drawRoundedRect(10, 46, 300, 64, 12, COLOR_WHITE, 0.2f);
-    C2D_DrawRectSolid(10, 109, 0.25f, 300, 1, COLOR_LINE);
-
-    drawText(
-        clientSeen ? "iPhone detecte" : "En attente de l'iPhone",
-        24,
-        57,
-        0.51f,
-        clientSeen ? COLOR_GREEN : COLOR_TEXT
-    );
-    drawText(lastAction.substr(0, 43), 24, 84, 0.34f, COLOR_MUTED);
-
-    drawRoundedRect(10, 122, 300, 64, 12, COLOR_WHITE, 0.2f);
-    drawText("Clavier distant", 24, 132, 0.45f, COLOR_TEXT);
-
-    if (lastText.empty()) {
-        drawText("Aucun texte recu", 24, 158, 0.34f, COLOR_MUTED);
-    } else {
-        drawText(lastText.substr(0, 45), 24, 157, 0.34f, COLOR_BLUE_DARK);
+    if (selected) {
+        // Cadre épais clair + liseré jaune, comme la sélection très lisible de TWiLight.
+        drawRoundedRect(x - 5, y - 5, w + 10, h + 10, 9, C2D_Color32(255, 212, 61, 255), 0.30f);
+        drawRoundedRect(x - 2, y - 2, w + 4, h + 4, 7, COLOR_WHITE, 0.35f);
     }
 
-    drawText("Remote : " + lastRemote, 13, 204, 0.34f, COLOR_MUTED);
-    drawText("X Nouveau PIN", 107, 204, 0.34f, COLOR_ORANGE);
-    drawText("START Quitter", 220, 204, 0.34f, COLOR_MUTED);
+    drawRoundedRect(x + 2, y + 3, w, h, 7, C2D_Color32(74, 90, 101, 45), 0.39f);
+    drawRoundedRect(x, y, w, h, 7, twilightTileColor(index), 0.40f);
+    drawTwilightIconGlyph(index, x + w / 2.0f, y + h / 2.0f, COLOR_WHITE);
+}
+
+void drawHomeTopScreen() {
+    // Composition inspirée du thème Nintendo 3DS de TWiLight Menu++ :
+    // barre d'état fine + grande zone descriptive.
+    C2D_TargetClear(topTarget, C2D_Color32(240, 243, 238, 255));
+    C2D_SceneBegin(topTarget);
+
+    // Fine barre supérieure
+    C2D_DrawRectSolid(0, 0, 0.10f, 400, 25, C2D_Color32(248, 250, 247, 255));
+    C2D_DrawRectSolid(0, 24, 0.12f, 400, 1, C2D_Color32(190, 198, 194, 255));
+
+    drawText("3DS Link", 13, 4, 0.43f, COLOR_TEXT);
+    drawText(serverReady ? "Wi-Fi" : "Hors ligne", 292, 5, 0.31f, serverReady ? COLOR_GREEN : COLOR_RED);
+    drawText("v1.2", 354, 5, 0.31f, COLOR_MUTED);
+
+    // Zone principale
+    drawRoundedRect(19, 40, 362, 143, 15, C2D_Color32(214, 219, 216, 95), 0.15f);
+    drawRoundedRect(16, 37, 362, 143, 15, COLOR_WHITE, 0.20f);
+
+    // Grande icône de l'élément sélectionné
+    drawRoundedRect(34, 56, 96, 96, 15, twilightTileColor(homeSelection), 0.35f);
+    drawTwilightIconGlyph(homeSelection, 82, 104, COLOR_WHITE);
+
+    drawText(HOME_NAMES[homeSelection], 151, 61, 0.63f, COLOR_TEXT);
+    drawText(HOME_DESCRIPTIONS[homeSelection], 151, 94, 0.34f, COLOR_MUTED);
+
+    if (homeSelection == 4) {
+        drawText(serverReady ? "iPhone joignable" : "Serveur indisponible", 151, 122, 0.36f,
+                 serverReady ? COLOR_GREEN : COLOR_RED);
+        if (serverReady) drawText(localIp + ":" + std::to_string(PORT), 151, 143, 0.31f, COLOR_BLUE_DARK);
+    } else if (homeSelection == 3) {
+        drawText("A : ouvrir l'appareil photo", 151, 128, 0.34f, COLOR_BLUE_DARK);
+    } else {
+        drawText("Fonction disponible sur l'iPhone", 151, 128, 0.32f, COLOR_BLUE_DARK);
+    }
+
+    // Barre d'aide basse façon launcher
+    C2D_DrawRectSolid(0, 204, 0.11f, 400, 36, C2D_Color32(246, 248, 245, 255));
+    C2D_DrawRectSolid(0, 204, 0.12f, 400, 1, C2D_Color32(196, 202, 198, 255));
+    drawText("◀ ▶  Choisir", 18, 214, 0.34f, COLOR_MUTED);
+    drawCenteredText("A  Ouvrir", 200, 214, 0.36f, COLOR_TEXT);
+    drawText("Y  Camera", 308, 214, 0.34f, COLOR_MUTED);
+}
+
+void drawHomeBottomScreen() {
+    C2D_TargetClear(bottomTarget, C2D_Color32(231, 235, 231, 255));
+    C2D_SceneBegin(bottomTarget);
+
+    // Header minimal façon TWiLight 3DS UI.
+    C2D_DrawRectSolid(0, 0, 0.10f, 320, 31, C2D_Color32(247, 249, 246, 255));
+    C2D_DrawRectSolid(0, 30, 0.12f, 320, 1, C2D_Color32(184, 194, 189, 255));
+    drawCenteredText("3DS Link", 160, 5, 0.46f, COLOR_TEXT);
+
+    // Petit état iPhone
+    C2D_DrawCircleSolid(18, 16, 0.3f, 5, clientSeen ? COLOR_GREEN : COLOR_ORANGE);
+    drawText(clientSeen ? "iPhone" : "Local", 27, 7, 0.30f, COLOR_MUTED);
+
+    // Rangée principale de cinq tuiles.
+    const float startX = 10.0f;
+    const float gap = 63.0f;
+    const float y = 83.0f;
+    for (int i = 0; i < HOME_ITEM_COUNT; ++i) {
+        drawTwilightTile(i, startX + gap * i, y, i == homeSelection);
+    }
+
+    // Flèches de navigation
+    drawText("<", 4, 99, 0.60f, COLOR_MUTED);
+    drawText(">", 307, 99, 0.60f, COLOR_MUTED);
+
+    drawCenteredText(HOME_NAMES[homeSelection], 160, 151, 0.48f, COLOR_TEXT);
+
+    drawRoundedRect(37, 181, 246, 38, 12, COLOR_WHITE, 0.22f);
+    drawCenteredText(
+        homeSelection == 3 ? "A : Ouvrir Camera Link" : "A : Afficher les informations",
+        160, 190, 0.32f, COLOR_MUTED
+    );
+
+    // Indicateurs de page
+    for (int i = 0; i < HOME_ITEM_COUNT; ++i) {
+        C2D_DrawCircleSolid(
+            136 + i * 12,
+            229,
+            0.4f,
+            i == homeSelection ? 4 : 2,
+            i == homeSelection ? C2D_Color32(79, 158, 212, 255) : C2D_Color32(151, 161, 157, 255)
+        );
+    }
 }
 
 void drawCameraTopScreen() {
@@ -2175,34 +2251,44 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v1.1", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v1.2", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
-    C2D_TargetClear(bottomTarget, C2D_Color32(236, 241, 244, 255));
+    C2D_TargetClear(bottomTarget, C2D_Color32(231, 235, 231, 255));
     C2D_SceneBegin(bottomTarget);
 
-    C2D_DrawRectSolid(0, 0, 0.1f, 320, 37, C2D_Color32(28, 44, 56, 255));
-    C2D_DrawCircleSolid(294, 18, 0.3f, 5, COLOR_GREEN);
-    drawText("Camera Link", 13, 8, 0.54f, COLOR_WHITE);
+    C2D_DrawRectSolid(0, 0, 0.1f, 320, 31, C2D_Color32(247, 249, 246, 255));
+    C2D_DrawRectSolid(0, 30, 0.2f, 320, 1, C2D_Color32(184, 194, 189, 255));
+    drawCenteredText("Camera Link", 160, 5, 0.45f, COLOR_TEXT);
 
-    drawRoundedRect(11, 50, 298, 55, 12, COLOR_WHITE, 0.2f);
-    drawText("Photos de la session", 24, 61, 0.43f, COLOR_TEXT);
-    drawText(std::to_string(cameraPhotoCount), 262, 57, 0.66f, COLOR_BLUE_DARK);
-    if (!lastPhotoName.empty()) drawText(lastPhotoName.substr(0, 28), 24, 84, 0.31f, COLOR_MUTED);
-    else drawText("Aucune photo pour le moment", 24, 84, 0.31f, COLOR_MUTED);
+    C2D_DrawCircleSolid(18, 16, 0.4f, 5, cameraHasFrame ? COLOR_GREEN : COLOR_ORANGE);
+    drawText(cameraHasFrame ? "LIVE" : "...", 27, 7, 0.29f, COLOR_MUTED);
 
-    // Gros declencheur tactile, dans l'esprit de l'appareil photo 3DS.
-    C2D_DrawCircleSolid(160, 164, 0.3f, 38, C2D_Color32(190, 202, 209, 255));
-    C2D_DrawCircleSolid(160, 164, 0.4f, 32, COLOR_WHITE);
-    C2D_DrawCircleSolid(160, 164, 0.5f, 25, COLOR_BLUE);
-    C2D_DrawCircleSolid(160, 164, 0.6f, 18, C2D_Color32(239, 248, 253, 255));
+    // Carte compteur à gauche
+    drawRoundedRect(16, 48, 104, 68, 12, COLOR_WHITE, 0.22f);
+    drawText("SESSION", 30, 59, 0.29f, COLOR_MUTED);
+    drawCenteredText(std::to_string(cameraPhotoCount), 68, 78, 0.74f, COLOR_BLUE_DARK);
 
-    drawText("B Retour", 17, 213, 0.35f, COLOR_MUTED);
-    drawCenteredText("A  Prendre", 160, 213, 0.35f, COLOR_TEXT);
-    drawText("Y Accueil", 244, 213, 0.35f, COLOR_MUTED);
+    // Dernière photo
+    drawRoundedRect(134, 48, 170, 68, 12, COLOR_WHITE, 0.22f);
+    drawText("DERNIERE PHOTO", 147, 59, 0.28f, COLOR_MUTED);
+    if (!lastPhotoName.empty())
+        drawText(lastPhotoName.substr(0, 22), 147, 82, 0.28f, COLOR_TEXT);
+    else
+        drawText("Aucune", 147, 82, 0.31f, COLOR_MUTED);
+
+    // Déclencheur façon icône de launcher
+    drawRoundedRect(120, 132, 80, 70, 14, C2D_Color32(224, 229, 226, 255), 0.28f);
+    drawRoundedRect(124, 128, 72, 70, 14, COLOR_WHITE, 0.31f);
+    C2D_DrawCircleSolid(160, 163, 0.4f, 25, C2D_Color32(75, 170, 226, 255));
+    C2D_DrawCircleSolid(160, 163, 0.5f, 16, COLOR_WHITE);
+    C2D_DrawCircleSolid(160, 163, 0.6f, 10, C2D_Color32(75, 170, 226, 255));
+
+    drawText("B Retour", 15, 216, 0.32f, COLOR_MUTED);
+    drawCenteredText("A Photo", 160, 216, 0.34f, COLOR_TEXT);
+    drawText("Y Accueil", 247, 216, 0.32f, COLOR_MUTED);
 }
-
 
 void refreshCameraBottomUi() {
     // Pendant Camera Link, l'écran du bas n'est pas double-bufferisé.
@@ -2352,7 +2438,24 @@ int main() {
 
         cameraUiPrimed = false;
 
-        if (down & KEY_A) startServer();
+        if (down & KEY_LEFT) {
+            homeSelection = (homeSelection + HOME_ITEM_COUNT - 1) % HOME_ITEM_COUNT;
+        }
+        if (down & KEY_RIGHT) {
+            homeSelection = (homeSelection + 1) % HOME_ITEM_COUNT;
+        }
+
+        if (down & KEY_A) {
+            if (homeSelection == 3) {
+                cameraMode = true;
+                cameraCaptureRequested = false;
+                cameraStatus = "Demarrage du viseur...";
+                gfxSetDoubleBuffering(GFX_TOP, true);
+                gfxSetDoubleBuffering(GFX_BOTTOM, false);
+                continue;
+            }
+            if (!serverReady) startServer();
+        }
 
         if (down & KEY_Y) {
             cameraMode = true;

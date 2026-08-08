@@ -1,26 +1,29 @@
 # 3DS Link
 
-## v1.1 — PWA UI + Color Fix
+## v1.2 — TWiLight UI
 
-### Colorimétrie
-Le RGB565 de CAMU est décodé avec le rouge dans les bits hauts et le bleu dans
-les bits bas pour les images BMP/Safari. Le viseur natif 3DS reste inchangé.
+Refonte visuelle inspirée du thème Nintendo 3DS de TWiLight Menu++.
 
-### Interface iPhone
-- design de type application/PWA ;
-- barre supérieure translucide ;
-- dock inférieur fixe ;
-- cartes arrondies et surfaces vitrées ;
-- meta tags iOS standalone ;
-- manifest Web App et icône SVG servis directement par la 3DS ;
-- Camera Link intégré au même langage visuel.
+### Références
+TWiLight Menu++ fournit une interface Nintendo 3DS/DSi dans le sous-projet
+`romsel_dsimenutheme`, ainsi qu'un système de thèmes 3DS personnalisables.
 
-### Interface 3DS
-- en-têtes sombres plus proches d'une application système ;
-- accent bleu commun avec l'iPhone ;
-- Camera Link et écran d'activité harmonisés ;
-- aucun changement dans le moteur caméra natif v0.8.
+### 3DS
+- écran tactile transformé en launcher à cinq tuiles ;
+- sélection jaune/blanche très visible ;
+- navigation gauche/droite au D-Pad ;
+- écran supérieur consacré au nom, à la grande icône et à la description ;
+- A ouvre Camera Link lorsqu'il est sélectionné ;
+- Y reste un raccourci Camera Link ;
+- barre d'état fine et indicateurs de page ;
+- Camera Link redessiné dans le même langage visuel ;
+- pictogrammes originaux dessinés par code : aucun asset Nintendo/TWiLight copié.
 
-Note : la page est servie sur le réseau local en HTTP. Le design et le mode
-"web app" iOS sont présents, mais certaines fonctions PWA modernes comme les
-Service Workers exigent normalement HTTPS.
+### iPhone
+- interface Companion harmonisée avec le launcher 3DS ;
+- fond quadrillé discret, cartes système, boutons bombés ;
+- dock qui reprend le comportement de sélection du thème ;
+- moteur réseau v1.0 et correction couleur v1.1 conservés.
+
+### Technique
+Le moteur CAMU validé depuis la v0.8 n'est pas modifié.
