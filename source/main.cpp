@@ -1,6 +1,5 @@
 #include <3ds.h>
 #include <citro2d.h>
-#include <tex3ds.h>
 #include "qrcodegen.h"
 
 #include <arpa/inet.h>
@@ -91,11 +90,6 @@ unsigned int cameraWarmupFrames = 0;
 std::vector<u8> cameraFrame(CAMERA_FRAME_BYTES);
 std::vector<u8> cameraReceiveBuffer(CAMERA_FRAME_BYTES);
 
-C3D_Tex cameraTexture{};
-Tex3DS_SubTexture cameraSubTexture{};
-C2D_Image cameraImage{};
-bool cameraTextureReady = false;
-std::vector<u16> cameraTextureBuffer(512 * 256, 0);
 
 C3D_RenderTarget* topTarget = nullptr;
 C3D_RenderTarget* bottomTarget = nullptr;
@@ -474,110 +468,113 @@ bool startCameraStream() {
     return true;
 }
 
-bool initCameraTexture() {
-    if (cameraTextureReady) return true;
 
-    if (!C3D_TexInit(&cameraTexture, 512, 256, GPU_RGB565)) {
-        cameraStatus = "Texture camera indisponible";
+bool receiveCameraFrame() {
+    if (!cameraActive) return false;
+
+    if (cameraReceiveEvent) {
+        svcCloseHandle(cameraReceiveEvent);
+        cameraReceiveEvent = 0;
+    }
+
+    const Result receiveResult = CAMU_SetReceiving(
+        &cameraReceiveEvent,
+        cameraReceiveBuffer.data(),
+        PORT_CAM1,
+        CAMERA_FRAME_BYTES,
+        static_cast<s16>(cameraTransferBytes)
+    );
+
+    if (R_FAILED(receiveResult)) {
+        cameraStatus = "Erreur reception camera";
         return false;
     }
 
-    C3D_TexSetFilter(&cameraTexture, GPU_LINEAR, GPU_LINEAR);
-    C3D_TexSetWrap(&cameraTexture, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+    // On attend réellement la prochaine frame au lieu de tester l'event une seule
+    // fois par boucle. C'est le modèle utilisé par l'exemple vidéo officiel.
+    const Result waitResult = svcWaitSynchronization(
+        cameraReceiveEvent,
+        CAMERA_WAIT_TIMEOUT
+    );
 
-    cameraSubTexture = {
-        static_cast<u16>(CAMERA_WIDTH),
-        static_cast<u16>(CAMERA_HEIGHT),
-        0.0f,
-        1.0f,
-        static_cast<float>(CAMERA_WIDTH) / 512.0f,
-        1.0f - static_cast<float>(CAMERA_HEIGHT) / 256.0f
-    };
+    svcCloseHandle(cameraReceiveEvent);
+    cameraReceiveEvent = 0;
 
-    cameraImage = { &cameraTexture, &cameraSubTexture };
-    cameraTextureReady = true;
+    if (R_FAILED(waitResult)) {
+        CAMU_StopCapture(PORT_CAM1);
+        CAMU_ClearBuffer(PORT_CAM1);
+        CAMU_StartCapture(PORT_CAM1);
+        cameraStatus = "Resynchronisation camera...";
+        return false;
+    }
+
+    cameraFrame.swap(cameraReceiveBuffer);
+    cameraHasFrame = true;
+    ++cameraWarmupFrames;
+
+    if (cameraWarmupFrames < 8) {
+        cameraStatus = "Reglage exposition / balance des blancs...";
+    } else {
+        cameraStatus = "LIVE - pret a prendre une photo";
+    }
+
     return true;
 }
 
-static inline unsigned int morton8x8(unsigned int x, unsigned int y) {
-    static const unsigned int xLut[8] = {0, 1, 4, 5, 16, 17, 20, 21};
-    static const unsigned int yLut[8] = {0, 2, 8, 10, 32, 34, 40, 42};
-    return xLut[x & 7] + yLut[y & 7];
-}
+// Affichage basé directement sur l'exemple devkitPro camera/video.
+// Le framebuffer 3DS est en RGB8 et organisé en colonnes, pas comme une image
+// classique rangée ligne par ligne.
+void writeCameraFrameToTopFramebuffer(const u8* image) {
+    if (!image) return;
 
-static inline size_t tiledTextureIndex(unsigned int x, unsigned int y, unsigned int width) {
-    const unsigned int tileX = x & ~7u;
-    const unsigned int tileY = y & ~7u;
-    return static_cast<size_t>(tileY) * width +
-           static_cast<size_t>(tileX) * 8u +
-           morton8x8(x, y);
-}
+    u16 fbWidth = 0;
+    u16 fbHeight = 0;
+    u8* framebuffer = gfxGetFramebuffer(
+        GFX_TOP,
+        GFX_LEFT,
+        &fbWidth,
+        &fbHeight
+    );
 
-void updateCameraTexture() {
-    if (!cameraHasFrame || !initCameraTexture()) return;
-
-    std::fill(cameraTextureBuffer.begin(), cameraTextureBuffer.end(), 0);
-
-    // IMPORTANT :
-    // C3D_TexUpload attend la disposition tuilée (8x8 Morton) native du PICA200.
-    // La v0.5 lui envoyait des pixels linéaires : c'est la cause des bandes rouges
-    // répétées visibles sur l'écran supérieur.
-    //
-    // La caméra fournit déjà du RGB565 natif : aucun aller-retour en RGBA8 n'est
-    // nécessaire pour l'aperçu 3DS. On conserve donc exactement les 16 bits CAMU.
-    const u16* pixels = reinterpret_cast<const u16*>(cameraFrame.data());
-
-    constexpr unsigned int textureWidth = 512;
-    constexpr unsigned int textureHeight = 256;
-    constexpr unsigned int yOffset = textureHeight - CAMERA_HEIGHT; // 16 lignes
-
-    for (unsigned int y = 0; y < CAMERA_HEIGHT; ++y) {
-        for (unsigned int x = 0; x < CAMERA_WIDTH; ++x) {
-            const unsigned int texY = y + yOffset;
-            const size_t dst = tiledTextureIndex(x, texY, textureWidth);
-            cameraTextureBuffer[dst] = pixels[y * CAMERA_WIDTH + x];
-        }
-    }
-
-    C3D_TexUpload(&cameraTexture, cameraTextureBuffer.data());
-}
-
-void pollCameraFrame() {
-    if (!cameraActive) return;
-
-    if (!cameraReceiveEvent) {
-        const Result result = CAMU_SetReceiving(
-            &cameraReceiveEvent,
-            cameraReceiveBuffer.data(),
-            PORT_CAM1,
-            CAMERA_FRAME_BYTES,
-            static_cast<s16>(cameraTransferBytes)
-        );
-
-        if (R_FAILED(result)) {
-            cameraStatus = "Erreur reception camera";
-            stopCameraStream();
-        }
+    if (!framebuffer || fbWidth < CAMERA_WIDTH || fbHeight < CAMERA_HEIGHT) {
         return;
     }
 
-    const Result wait = svcWaitSynchronization(cameraReceiveEvent, 0);
-    if (R_SUCCEEDED(wait)) {
-        svcCloseHandle(cameraReceiveEvent);
-        cameraReceiveEvent = 0;
+    const u16* pixels = reinterpret_cast<const u16*>(image);
 
-        cameraFrame.swap(cameraReceiveBuffer);
-        cameraHasFrame = true;
-        ++cameraWarmupFrames;
+    for (int y = 0; y < CAMERA_HEIGHT; ++y) {
+        const int drawY = CAMERA_HEIGHT - 1 - y;
 
-        updateCameraTexture();
+        for (int x = 0; x < CAMERA_WIDTH; ++x) {
+            const u16 data = pixels[y * CAMERA_WIDTH + x];
 
-        if (cameraWarmupFrames < 8) {
-            cameraStatus = "Reglage exposition / balance des blancs...";
-        } else {
-            cameraStatus = "LIVE - pret a prendre une photo";
+            // Disposition RGB565 confirmée par l'exemple officiel devkitPro :
+            // R = bits 0..4, G = 5..10, B = 11..15.
+            const u8 r = static_cast<u8>(((data      ) & 0x1F) << 3);
+            const u8 g = static_cast<u8>(((data >>  5) & 0x3F) << 2);
+            const u8 b = static_cast<u8>(((data >> 11) & 0x1F) << 3);
+
+            const size_t offset =
+                (static_cast<size_t>(drawY) +
+                 static_cast<size_t>(x) * CAMERA_HEIGHT) * 3;
+
+            framebuffer[offset + 0] = r;
+            framebuffer[offset + 1] = g;
+            framebuffer[offset + 2] = b;
         }
     }
+}
+
+void presentCameraFrame() {
+    if (!cameraHasFrame) return;
+
+    writeCameraFrameToTopFramebuffer(cameraFrame.data());
+
+    // En mode caméra, seul l'écran du haut change. Les deux buffers du bas ont
+    // été préremplis avec la même interface, ce qui empêche tout clignotement.
+    gfxFlushBuffers();
+    gspWaitForVBlank();
+    gfxSwapBuffers();
 }
 
 std::string makeCameraFilename() {
@@ -1040,7 +1037,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.6</div>
+    <div class="small">v0.7</div>
   </div>
 </header>
 
@@ -1104,8 +1101,8 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 
 
   <section id="camera" class="panel">
-    <h2>Live Camera</h2>
-    <div class="muted">Le viseur de la 3DS est reproduit ici en direct sur ton iPhone. Le flux reste entièrement sur ton réseau local.</div>
+    <h2>Camera</h2>
+    <div class="muted">Le viseur 3DS est en cours de stabilisation. Le direct iPhone reviendra après validation de l'affichage sur la console.</div>
 
     <div style="margin-top:12px;background:#101416;border-radius:16px;padding:8px;position:relative;overflow:hidden">
       <img id="liveCamera" style="display:block;width:100%;aspect-ratio:5/3;object-fit:contain;border-radius:10px;background:#090b0c" alt="Flux caméra 3DS">
@@ -1123,10 +1120,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.6 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v0.7 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.6 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.7 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1694,12 +1691,12 @@ void handleClient(sockaddr_in& client) {
     }
 
     if (route == "/camera/live.bmp" && method == "GET") {
-        if (!cameraMode) {
-            cameraMode = true;
-            cameraStatus = "Demarrage demande par l'iPhone";
-        }
-
-        sendLiveCameraBmp(clientSocket);
+        sendSimple(
+            clientSocket,
+            503,
+            "Service Unavailable",
+            "Flux iPhone temporairement desactive en v0.7 pendant la stabilisation du viseur 3DS"
+        );
         return;
     }
 
@@ -1799,7 +1796,7 @@ void drawHomeTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.6", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.7", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1885,44 +1882,8 @@ void drawCameraTopScreen() {
     C2D_TargetClear(topTarget, C2D_Color32(10, 12, 14, 255));
     C2D_SceneBegin(topTarget);
 
-    if (cameraHasFrame && cameraTextureReady) {
-        C2D_DrawImageAt(
-            cameraImage,
-            0.0f,
-            0.0f,
-            0.15f,
-            nullptr,
-            1.0f,
-            1.0f
-        );
-    } else {
-        C2D_DrawRectSolid(0, 0, 0.1f, 400, 240, C2D_Color32(18, 22, 25, 255));
-        drawCenteredText("Demarrage de la camera...", 200, 108, 0.48f, COLOR_WHITE);
-    }
-
-    // Bandeaux discrets par-dessus le viseur, dans l'esprit de l'appareil photo 3DS.
-    C2D_DrawRectSolid(0, 0, 0.70f, 400, 29, C2D_Color32(0, 0, 0, 155));
-    C2D_DrawRectSolid(0, 207, 0.70f, 400, 33, C2D_Color32(0, 0, 0, 155));
-
-    drawText("Camera Link", 12, 5, 0.52f, COLOR_WHITE);
-    drawText("v0.6", 352, 7, 0.32f, C2D_Color32(220, 226, 230, 255));
-
-    C2D_DrawCircleSolid(
-        312,
-        15,
-        0.8f,
-        5,
-        cameraHasFrame ? COLOR_GREEN : COLOR_ORANGE
-    );
-    drawText(cameraHasFrame ? "LIVE" : "...", 322, 7, 0.32f, COLOR_WHITE);
-
-    drawCenteredText(
-        cameraStatus.substr(0, 44),
-        200,
-        214,
-        0.34f,
-        COLOR_WHITE
-    );
+    drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
+    drawCenteredText("3DS Link v0.7", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
@@ -1957,6 +1918,25 @@ void drawTopScreen() {
 void drawBottomScreen() {
     if (cameraMode) drawCameraBottomScreen();
     else drawHomeBottomScreen();
+}
+
+
+void primeCameraUiBuffers() {
+    // Le framebuffer brut du haut va être swappé directement ensuite.
+    // On remplit donc les DEUX buffers de l'écran inférieur avec exactement
+    // la même interface afin qu'il reste parfaitement fixe pendant les swaps.
+    for (int i = 0; i < 2; ++i) {
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+
+        C2D_TargetClear(topTarget, C2D_Color32(10, 12, 14, 255));
+        C2D_SceneBegin(topTarget);
+        drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
+
+        drawCameraBottomScreen();
+
+        C3D_FrameEnd(0);
+        C2D_TextBufClear(textBuffer);
+    }
 }
 
 bool cameraTouchPressed() {
@@ -2004,6 +1984,8 @@ int main() {
 
     startServer();
 
+    bool cameraUiPrimed = false;
+
     while (aptMainLoop()) {
         hidScanInput();
         const u32 down = hidKeysDown();
@@ -2011,55 +1993,76 @@ int main() {
         if (down & KEY_START) break;
 
         if (cameraMode) {
-            if (!cameraActive) startCameraStream();
+            // En v0.7 on donne la priorité absolue au viseur 3DS :
+            // aucune requête HTTP n'est traitée pendant le mode caméra.
+            if (!cameraUiPrimed) {
+                primeCameraUiBuffers();
+                cameraUiPrimed = true;
+            }
+
+            if (!cameraActive) {
+                if (!startCameraStream()) {
+                    cameraMode = false;
+                    cameraUiPrimed = false;
+                    continue;
+                }
+            }
 
             if (down & KEY_B || down & KEY_Y) {
                 cameraMode = false;
+                cameraUiPrimed = false;
                 stopCameraStream();
                 cameraStatus = "Pret a prendre une photo";
-            } else if ((down & KEY_A) || ((down & KEY_TOUCH) && cameraTouchPressed())) {
+                continue;
+            }
+
+            if ((down & KEY_A) || ((down & KEY_TOUCH) && cameraTouchPressed())) {
                 cameraCaptureRequested = true;
             }
-        } else {
-            if (down & KEY_A) startServer();
-            if (down & KEY_Y) {
-                cameraMode = true;
-                cameraStatus = "Pret - A ou bouton tactile";
+
+            if (receiveCameraFrame()) {
+                if (cameraCaptureRequested && cameraWarmupFrames >= 8) {
+                    cameraCaptureRequested = false;
+                    captureCameraPhoto();
+                }
+
+                presentCameraFrame();
             }
-            if (down & KEY_X) {
-                generatePin();
-                lastAction = "Nouveau code PIN genere";
-            }
+
+            // Surtout ne pas passer par Citro2D/Citro3D ici :
+            // il écraserait le framebuffer caméra et provoquerait le clignotement.
+            continue;
         }
 
+        cameraUiPrimed = false;
+
+        if (down & KEY_A) startServer();
+
+        if (down & KEY_Y) {
+            cameraMode = true;
+            cameraCaptureRequested = false;
+            cameraStatus = "Demarrage du viseur...";
+            continue;
+        }
+
+        if (down & KEY_X) {
+            generatePin();
+            lastAction = "Nouveau code PIN genere";
+        }
+
+        // Le serveur réseau tourne uniquement hors du mode caméra dans cette
+        // version de stabilisation.
         pollServer();
 
-        if (cameraMode && !cameraActive) {
-            startCameraStream();
-        }
-
-        if (cameraActive) {
-            pollCameraFrame();
-        }
-
-        if (cameraCaptureRequested && cameraHasFrame && cameraWarmupFrames >= 3) {
-            cameraCaptureRequested = false;
-            captureCameraPhoto();
-        }
-
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
-        drawTopScreen();
-        drawBottomScreen();
+        drawHomeTopScreen();
+        drawHomeBottomScreen();
         C3D_FrameEnd(0);
 
         C2D_TextBufClear(textBuffer);
     }
 
     stopCameraStream();
-    if (cameraTextureReady) {
-        C3D_TexDelete(&cameraTexture);
-        cameraTextureReady = false;
-    }
     stopServer();
     shutdownGraphics();
     return 0;

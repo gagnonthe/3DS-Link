@@ -1,36 +1,40 @@
 # 3DS Link
 
-## v0.6 — Camera pipeline fix
+## v0.7 — Stable 3DS Camera Preview
 
-Cette version corrige le pipeline caméra après les problèmes observés sur la vraie console.
+Cette version se concentre uniquement sur la caméra de la 3DS.
 
-### Ce qui a été corrigé
+### Changement d'architecture
 
-- l'aperçu 3DS n'envoie plus une image RGBA linéaire directement à `C3D_TexUpload` ;
-- le buffer caméra RGB565 est maintenant converti vers la disposition **tuilée 8×8 Morton** attendue par le GPU PICA200 ;
-- le viseur utilise directement une texture `GPU_RGB565`, ce qui évite une conversion couleur inutile pour l'écran 3DS ;
-- la conversion RGB565 → BMP garde l'ordre de composantes utilisé par l'exemple caméra officiel devkitPro ;
-- le mode caméra passe sur une fréquence adaptative `15_TO_5`, plus adaptée lorsque la lumière est faible ;
-- mode photo, contraste et correction de lentille sont explicitement initialisés ;
-- la caméra attend davantage de frames avant d'autoriser une photo afin de laisser l'exposition et la balance des blancs se stabiliser ;
-- le flux iPhone et les BMP continuent d'utiliser le même frame source que le viseur.
+La v0.5/v0.6 faisait passer le flux caméra dans une texture Citro2D/Citro3D.
+Sur la vraie console cela provoquait encore des saccades, une mauvaise position de
+l'image, des couleurs instables et du clignotement.
 
-### Pourquoi les bandes rouges apparaissaient
+La v0.7 supprime complètement cette étape pour le viseur.
 
-Citro3D/PICA200 ne lit pas une texture dynamique comme un tableau classique rangé ligne par ligne.
-La v0.5 envoyait pourtant notre buffer RGBA8 linéaire directement à `C3D_TexUpload`.
-Le GPU interprétait alors ces octets comme des tuiles 8×8, d'où les motifs verticaux répétitifs.
+Le buffer `OUTPUT_RGB_565` de CAMU est maintenant affiché directement dans le
+framebuffer RGB8 de l'écran supérieur, avec la même organisation mémoire que
+l'exemple officiel `devkitPro/3ds-examples/camera/video`.
 
-### Référence
+### Autres corrections
 
-La logique de capture et l'ordre RGB565 suivent l'exemple officiel
-`devkitPro/3ds-examples/camera/video`.
+- attente bloquante de la vraie frame suivante au lieu d'un simple polling à 0 ns ;
+- une nouvelle réception CAMU est armée à chaque frame ;
+- resynchronisation de la capture si une réception échoue ;
+- aucune opération réseau pendant le mode caméra ;
+- aucun rendu Citro2D/Citro3D sur l'écran supérieur pendant le direct ;
+- les deux buffers de l'écran inférieur contiennent la même interface afin
+  d'éviter son clignotement pendant les swaps ;
+- le flux direct Safari est volontairement désactivé dans cette version de test.
 
-### Test conseillé
+### Test attendu
 
-1. Ouvre Camera Link.
-2. Attends environ 1 à 2 secondes.
-3. Vérifie le viseur de la 3DS.
-4. Vérifie ensuite le flux sur l'iPhone.
-5. Prends une photo d'un objet avec plusieurs couleurs faciles à reconnaître.
-6. Compare viseur 3DS, flux Safari et BMP téléchargé.
+1. Ouvre Camera Link avec `Y`.
+2. Bouge lentement la 3DS.
+3. L'image doit suivre continuellement, sans rester bloquée sur la première frame.
+4. Elle doit occuper toujours exactement les 400×240 pixels de l'écran supérieur.
+5. Il ne doit plus y avoir de clignotement causé par Citro2D.
+6. Après 1 à 2 secondes, teste une photo avec `A`.
+
+Une fois ce viseur confirmé stable sur une vraie console, le streaming iPhone
+sera réintroduit séparément afin de ne pas dégrader la boucle caméra.
