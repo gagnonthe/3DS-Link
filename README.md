@@ -1,35 +1,38 @@
 # 3DS Link
 
-## v0.8 — Camera core rebuilt from devkitPro reference
+## v0.9 — Instant Sync
 
-La v0.8 reconstruit la boucle vidéo CAMU à partir du fonctionnement de
-`devkitPro/3ds-examples/camera/video`.
+La v0.9 conserve le moteur caméra v0.8 intact et améliore uniquement la synchronisation
+entre la 3DS et l'iPhone.
 
-### Pourquoi la v0.7 pouvait rester bloquée
+### Photo de la session
 
-La v0.7 attendait seulement l'événement de réception d'image. L'exemple officiel
-surveille également l'interruption **buffer error** de CAMU et redémarre la
-capture lorsqu'elle se produit. Sans ce traitement, une erreur du buffer pouvait
-faire enchaîner les timeouts et laisser l'écran sur « Démarrage de la caméra ».
+- le compteur n'augmente qu'après une sauvegarde BMP réussie ;
+- l'écran inférieur est redessiné immédiatement après la prise ;
+- le nom de la dernière photo apparaît sans devoir quitter puis rouvrir Camera Link ;
+- le viseur supérieur continue d'utiliser le framebuffer natif v0.8.
 
-### v0.8
+### Latence iPhone ↔ 3DS
 
-- `CAMU_GetBufferErrorInterruptEvent` utilisé comme dans l'exemple officiel ;
-- `CAMU_SetReceiving` réarmé après chaque frame ;
-- attente simultanée de l'événement d'erreur et de l'événement de réception ;
-- reprise de `CAMU_StartCapture` après une interruption ;
-- timeout = resynchronisation, jamais une attente infinie ;
-- buffer caméra alloué avec `malloc`, comme l'exemple de référence ;
-- caméra extérieure en 400×240 RGB565 à 30 fps ;
-- copie directe du RGB565 vers le framebuffer RGB8 du top screen ;
-- double buffering du haut activé ;
-- écran inférieur figé pendant la caméra pour ne pas perturber la boucle vidéo ;
-- serveur/streaming iPhone toujours désactivé en mode Camera pour ce test.
+- Safari actualise la pellicule toutes les ~550 ms au lieu de 2,2 s ;
+- après un déclenchement iPhone, la recherche de la nouvelle photo passe de 650 ms à 250 ms ;
+- le serveur traite jusqu'à plusieurs requêtes en attente par frame sur l'accueil ;
+- les sockets ont désormais un timeout court pour qu'une connexion lente ne fige pas l'application ;
+- pendant Camera Link, une requête légère peut être traitée régulièrement sans arrêter le viseur ;
+- les gros transferts de fichiers sont temporairement refusés pendant le viseur afin de préserver sa fluidité.
 
-### Test attendu
+### Ce qui doit fonctionner pendant Camera Link
 
-L'ouverture de Camera Link ne doit plus prendre une minute.
-La première image devrait apparaître rapidement, puis suivre le mouvement de la
-console continuellement.
+- consultation de l'état caméra ;
+- demande de capture depuis l'iPhone ;
+- clavier distant ;
+- commandes Remote ;
+- rafraîchissement de la pellicule.
 
-Cette version doit être validée sur la vraie 3DS avant de réintroduire le direct iPhone.
+Les uploads/downloads lourds restent disponibles dès que l'utilisateur quitte Camera Link.
+
+### Important
+
+Le flux vidéo direct vers Safari reste volontairement désactivé dans cette version.
+Il sera réintroduit ensuite sur une architecture séparée, sans toucher à la boucle caméra
+v0.8 désormais validée sur la vraie console.

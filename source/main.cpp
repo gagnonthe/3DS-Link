@@ -662,13 +662,18 @@ bool captureCameraPhoto() {
         return false;
     }
 
-    if (!cameraHasFrame || cameraWarmupFrames < 8) {
+    if (!cameraHasFrame || cameraWarmupFrames < 5 || !cameraRawBuffer) {
         cameraStatus = "Attends une seconde : reglage des couleurs...";
         return false;
     }
 
-    ++cameraPhotoCount;
+    // Le compteur n'est modifié qu'après une vraie écriture réussie sur la SD.
+    const unsigned int nextPhotoNumber = cameraPhotoCount + 1;
+    const unsigned int previousCount = cameraPhotoCount;
+    cameraPhotoCount = nextPhotoNumber;
     const std::string name = makeCameraFilename();
+    cameraPhotoCount = previousCount;
+
     const std::string path = std::string(CAMERA_DIR) + "/" + name;
 
     if (!saveCameraBmp(path, cameraRawBuffer)) {
@@ -677,10 +682,12 @@ bool captureCameraPhoto() {
         return false;
     }
 
+    cameraPhotoCount = nextPhotoNumber;
+    lastPhotoName = name;
+
     CAMU_PlayShutterSound(SHUTTER_SOUND_TYPE_NORMAL);
 
-    lastPhotoName = name;
-    cameraStatus = "Photo prise - disponible sur l'iPhone";
+    cameraStatus = "Photo " + std::to_string(cameraPhotoCount) + " enregistree";
     lastAction = "Camera : " + name;
     return true;
 }
@@ -1102,7 +1109,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 <header>
   <div class="wrap headrow">
     <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v0.8</div>
+    <div class="small">v0.9</div>
   </div>
 </header>
 
@@ -1167,7 +1174,7 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
 
   <section id="camera" class="panel">
     <h2>Camera</h2>
-    <div class="muted">Le viseur 3DS est en cours de stabilisation. Le direct iPhone reviendra après validation de l'affichage sur la console.</div>
+    <div class="muted">Synchronisation rapide avec la 3DS. Les commandes Camera restent actives pendant le viseur.</div>
 
     <div style="margin-top:12px;background:#101416;border-radius:16px;padding:8px;position:relative;overflow:hidden">
       <img id="liveCamera" style="display:block;width:100%;aspect-ratio:5/3;object-fit:contain;border-radius:10px;background:#090b0c" alt="Flux caméra 3DS">
@@ -1185,10 +1192,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v0.8 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v0.9 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
   </section>
 
-  <footer>3DS Link v0.8 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v0.9 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1358,7 +1365,7 @@ async function refreshLiveCamera(){
 function startCameraLive(){
   if(liveCameraTimer) clearInterval(liveCameraTimer);
   refreshLiveCamera();
-  liveCameraTimer=setInterval(refreshLiveCamera,420);
+  liveCameraTimer=setInterval(refreshLiveCamera,300);
 }
 
 async function fetchCameraBlob(name){
@@ -1405,8 +1412,8 @@ async function remoteCapture(){
   $('cameraState').textContent='Capture demandée à la 3DS…';
   const r=await fetch('/api/camera/capture',{method:'POST',headers:headers()});
   if(!r.ok){toast('Capture refusée');return}
-  for(let i=0;i<14;i++){
-    await new Promise(resolve=>setTimeout(resolve,650));
+  for(let i=0;i<24;i++){
+    await new Promise(resolve=>setTimeout(resolve,250));
     try{
       const s=await fetch('/api/camera',{headers:headers()});
       if(!s.ok) continue;
@@ -1436,7 +1443,7 @@ async function deleteCameraPhoto(name){
 
 setInterval(()=>{
   if($('camera').classList.contains('active')) loadCamera(false);
-},2200);
+},550);
 
 if(pin) setTimeout(unlock,250);
 </script>
@@ -1680,6 +1687,24 @@ void handleClient(sockaddr_in& client) {
         return;
     }
 
+    // En mode Camera, on garde les commandes légères (état, capture, clavier,
+    // remote) mais on repousse les gros transferts SD pour protéger les 30 fps.
+    if (cameraMode &&
+        (route == "/upload" ||
+         route == "/download" ||
+         route == "/delete" ||
+         route == "/camera/file" ||
+         route == "/api/camera/delete")) {
+        sendSimple(
+            clientSocket,
+            423,
+            "Locked",
+            "{\"error\":\"camera_busy\",\"message\":\"Quitte Camera Link pour les gros transferts.\"}",
+            "application/json; charset=utf-8"
+        );
+        return;
+    }
+
     if (route == "/api/files" && method == "GET") {
         sendSimple(clientSocket, 200, "OK", filesJson(), "application/json; charset=utf-8");
         lastAction = "Liste des fichiers consultee";
@@ -1760,7 +1785,7 @@ void handleClient(sockaddr_in& client) {
             clientSocket,
             503,
             "Service Unavailable",
-            "Flux iPhone temporairement desactive en v0.8 pendant la stabilisation du viseur 3DS"
+            "Flux video iPhone encore desactive en v0.9; commandes et pellicule restent actives."
         );
         return;
     }
@@ -1773,7 +1798,7 @@ void handleClient(sockaddr_in& client) {
     if (route == "/api/camera/capture" && method == "POST") {
         cameraCaptureRequested = true;
         cameraMode = true;
-        cameraStatus = "Capture demandee depuis l'iPhone";
+        cameraStatus = "Capture iPhone en attente";
         sendSimple(clientSocket, 202, "Accepted", "{\"accepted\":true}", "application/json");
         return;
     }
@@ -1826,30 +1851,40 @@ void handleClient(sockaddr_in& client) {
     sendSimple(clientSocket, 404, "Not Found", "Route inconnue");
 }
 
-void pollServer() {
+void pollServer(int maxClients = 3) {
     if (!serverReady || serverSocket < 0) return;
 
-    sockaddr_in client{};
-    socklen_t clientLength = sizeof(client);
+    for (int handled = 0; handled < maxClients; ++handled) {
+        sockaddr_in client{};
+        socklen_t clientLength = sizeof(client);
 
-    clientSocket = accept(
-        serverSocket,
-        reinterpret_cast<sockaddr*>(&client),
-        &clientLength
-    );
+        clientSocket = accept(
+            serverSocket,
+            reinterpret_cast<sockaddr*>(&client),
+            &clientLength
+        );
 
-    if (clientSocket < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            statusMessage = std::string("accept: ") + strerror(errno);
+        if (clientSocket < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                statusMessage = std::string("accept: ") + strerror(errno);
+            }
+            return;
         }
-        return;
+
+        // Évite qu'un iPhone lent ou une connexion interrompue bloque la boucle
+        // principale pendant plusieurs secondes.
+        timeval timeout{};
+        timeout.tv_sec = 0;
+        timeout.tv_usec = cameraMode ? 60000 : 180000; // 60 ms camera, 180 ms accueil
+        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+
+        const int flags = fcntl(clientSocket, F_GETFL, 0);
+        fcntl(clientSocket, F_SETFL, flags & ~O_NONBLOCK);
+
+        handleClient(client);
+        closeClient();
     }
-
-    const int flags = fcntl(clientSocket, F_GETFL, 0);
-    fcntl(clientSocket, F_SETFL, flags & ~O_NONBLOCK);
-
-    handleClient(client);
-    closeClient();
 }
 
 void drawHomeTopScreen() {
@@ -1861,7 +1896,7 @@ void drawHomeTopScreen() {
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v0.8", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v0.9", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -1948,7 +1983,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v0.8", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v0.9", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
@@ -1973,6 +2008,16 @@ void drawCameraBottomScreen() {
     drawText("B Retour", 17, 213, 0.35f, COLOR_MUTED);
     drawCenteredText("A  Prendre", 160, 213, 0.35f, COLOR_TEXT);
     drawText("Y Accueil", 244, 213, 0.35f, COLOR_MUTED);
+}
+
+
+void refreshCameraBottomUi() {
+    // Pendant Camera Link, l'écran du bas n'est pas double-bufferisé.
+    // On peut donc le mettre à jour sans toucher au framebuffer brut du haut.
+    C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+    drawCameraBottomScreen();
+    C3D_FrameEnd(0);
+    C2D_TextBufClear(textBuffer);
 }
 
 void drawTopScreen() {
@@ -2058,7 +2103,7 @@ int main() {
         if (down & KEY_START) break;
 
         if (cameraMode) {
-            // En v0.8 on donne la priorité absolue au viseur 3DS :
+            // En v0.9 on donne la priorité absolue au viseur 3DS :
             // aucune requête HTTP n'est traitée pendant le mode caméra.
             if (!cameraUiPrimed) {
                 primeCameraUiBuffers();
@@ -2087,17 +2132,32 @@ int main() {
                 cameraCaptureRequested = true;
             }
 
+            static unsigned int cameraNetworkDivider = 0;
+
             if (receiveCameraFrame()) {
                 if (cameraCaptureRequested && cameraWarmupFrames >= 5) {
                     cameraCaptureRequested = false;
-                    captureCameraPhoto();
+
+                    if (captureCameraPhoto()) {
+                        // Le compteur et le nom de la dernière photo changent
+                        // immédiatement sur l'écran inférieur.
+                        refreshCameraBottomUi();
+                    }
                 }
 
                 presentCameraFrame();
             }
 
-            // Surtout ne pas passer par Citro2D/Citro3D ici :
-            // il écraserait le framebuffer caméra et provoquerait le clignotement.
+            // Une seule petite requête réseau tous les 3 passages caméra.
+            // Les gros transferts sont refusés tant que le viseur est ouvert.
+            ++cameraNetworkDivider;
+            if (cameraNetworkDivider >= 3) {
+                cameraNetworkDivider = 0;
+                pollServer(1);
+            }
+
+            // Aucun rendu Citro2D/Citro3D sur l'écran supérieur : le viseur v0.8
+            // reste intact.
             continue;
         }
 
@@ -2121,7 +2181,7 @@ int main() {
 
         // Le serveur réseau tourne uniquement hors du mode caméra dans cette
         // version de stabilisation.
-        pollServer();
+        pollServer(4);
 
         C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
         drawHomeTopScreen();
