@@ -352,9 +352,13 @@ u8 expand6(unsigned int value) {
 // La caméra 3DS renvoie OUTPUT_RGB_565 avec R dans les 5 bits faibles
 // et B dans les 5 bits forts (même disposition que l'exemple officiel devkitPro).
 void unpackCameraPixel(u16 data, u8& r, u8& g, u8& b) {
-    r = expand5(data & 0x1F);
+    // CAMU OUTPUT_RGB_565 : le mot 16 bits est 0bRRRRRGGGGGGBBBBB.
+    // Le framebuffer 3DS masque cette différence car son ordre d'octets RGB8
+    // n'est pas celui d'un BMP/Safari. Pour les fichiers Web, R et B doivent
+    // donc être lus dans cet ordre.
+    r = expand5((data >> 11) & 0x1F);
     g = expand6((data >> 5) & 0x3F);
-    b = expand5((data >> 11) & 0x1F);
+    b = expand5(data & 0x1F);
 }
 
 bool saveCameraBmp(const std::string& path, const u8* rgb565) {
@@ -1090,61 +1094,114 @@ std::string makeWebPage() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#459ed6">
+<meta name="theme-color" content="#0b84d8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="3DS Link">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/app-icon.svg">
 <title>3DS Link</title>
 <style>
 :root{
   color-scheme:light;
   font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Arial,sans-serif;
-  --blue:#459ed6;--blue2:#236da5;--bg:#eef4f8;--card:#fff;--line:#c6d5de;
-  --text:#273640;--muted:#71838e;--green:#39ad67;--red:#c94a51;
+  --accent:#0b84d8;--accent2:#52b7f1;--ink:#17232d;--muted:#6d7f8b;
+  --bg:#edf4f8;--surface:rgba(255,255,255,.94);--line:rgba(74,112,134,.18);
+  --green:#2faf68;--red:#d04b55;--shadow:0 16px 36px rgba(32,72,94,.13);
 }
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);min-height:100vh}
-header{background:linear-gradient(180deg,#7fc9ed,var(--blue));color:#fff;border-bottom:1px solid var(--blue2);padding:18px 16px 16px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{background:var(--bg)}
+body{margin:0;background:
+ radial-gradient(circle at 80% -10%,rgba(82,183,241,.28),transparent 34%),
+ linear-gradient(180deg,#e8f4fb 0,#f5f8fa 42%,#edf3f6 100%);
+ color:var(--ink);min-height:100vh;padding-bottom:88px}
+header{
+ position:sticky;top:0;z-index:20;
+ padding:calc(env(safe-area-inset-top) + 10px) 18px 12px;
+ background:rgba(245,250,253,.78);backdrop-filter:blur(22px) saturate(1.45);
+ -webkit-backdrop-filter:blur(22px) saturate(1.45);
+ border-bottom:1px solid rgba(72,113,139,.14)
+}
 .wrap{max-width:720px;margin:auto}
 .headrow{display:flex;justify-content:space-between;align-items:center;gap:12px}
-h1{font-size:28px;letter-spacing:-.5px;margin:0}.small{font-size:13px;opacity:.92}
-.status{margin:14px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 4px 14px #4f6d8018}
-.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--green);margin-right:7px;box-shadow:0 0 0 4px #39ad6722}
+.brand{display:flex;align-items:center;gap:11px}
+.appicon{width:42px;height:42px;border-radius:12px;background:
+ linear-gradient(145deg,#55c2f4,#087bd0);box-shadow:0 8px 20px #178bd548;
+ display:grid;place-items:center;color:white;font-size:22px;font-weight:900}
+h1{font-size:22px;letter-spacing:-.45px;margin:0;line-height:1.05}
+.small{font-size:12px;color:var(--muted)}
+.status{
+ margin:14px 14px 10px;background:var(--surface);border:1px solid var(--line);
+ border-radius:22px;padding:15px;box-shadow:var(--shadow);
+ backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)
+}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--green);
+ margin-right:7px;box-shadow:0 0 0 4px #2faf6820}
 .pinbox{display:flex;gap:8px;margin-top:12px}
-input,button,select{font:inherit}
-input[type=text],input[type=password]{width:100%;border:1px solid #b8cbd7;border-radius:11px;padding:12px;background:#fbfdfe;color:var(--text);outline:none}
-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px #459ed622}
-button{border:0;border-radius:11px;padding:11px 14px;font-weight:700;background:var(--blue);color:#fff}
-button.secondary{background:#e7eff4;color:#315267;border:1px solid #c9d8e1}
-button.danger{background:#fff0f1;color:#a8373e;border:1px solid #efc6c9}
+input,button,select,textarea{font:inherit}
+input[type=text],input[type=password],textarea{
+ width:100%;border:1px solid #c7d6de;border-radius:14px;padding:12px 13px;
+ background:#f9fcfd;color:var(--ink);outline:none
+}
+input:focus,textarea:focus{border-color:#72bceb;box-shadow:0 0 0 4px #0b84d812}
+button{
+ border:0;border-radius:14px;padding:11px 14px;font-weight:750;
+ background:linear-gradient(180deg,#24a2e8,#0b84d8);color:#fff;
+ box-shadow:0 5px 14px rgba(11,132,216,.18)
+}
+button:active{transform:scale(.975)}
+button.secondary{background:#edf4f8;color:#31576d;border:1px solid #cfdee6;box-shadow:none}
+button.danger{background:#fff0f1;color:#ad3640;border:1px solid #f0c7ca;box-shadow:none}
 button:disabled{opacity:.45}
-.tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;padding:0 14px 12px}
-.tab{background:#e4edf3;color:#45606f;border:1px solid #ccd9e1;padding:9px 5px;font-size:12px}
-.tab.active{background:#fff;color:#236da5;border-color:#9ccae5}
-.panel{display:none;margin:0 14px 14px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:15px;box-shadow:0 4px 14px #4f6d8012}
+.tabs{
+ position:fixed;z-index:30;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));
+ width:min(680px,calc(100% - 20px));display:grid;grid-template-columns:repeat(5,1fr);gap:5px;
+ padding:7px;background:rgba(247,251,253,.88);border:1px solid rgba(99,130,149,.22);
+ border-radius:22px;box-shadow:0 16px 35px rgba(35,70,90,.20);
+ backdrop-filter:blur(22px) saturate(1.5);-webkit-backdrop-filter:blur(22px) saturate(1.5)
+}
+.tab{background:transparent;color:#607684;border:0;padding:9px 3px;font-size:11px;box-shadow:none}
+.tab.active{background:#fff;color:#087dce;box-shadow:0 3px 10px #52788e24}
+.panel{
+ display:none;margin:0 14px 14px;background:var(--surface);border:1px solid var(--line);
+ border-radius:24px;padding:17px;box-shadow:var(--shadow);
+ backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)
+}
 .panel.active{display:block}
-h2{font-size:19px;margin:0 0 5px}.muted{color:var(--muted);font-size:13px}
-.drop{margin-top:14px;border:2px dashed #acd0e5;border-radius:14px;padding:18px;text-align:center;background:#f8fcfe}
+h2{font-size:22px;letter-spacing:-.4px;margin:0 0 5px}.muted{color:var(--muted);font-size:13px}
+.drop{margin-top:14px;border:1.5px dashed #98cce9;border-radius:18px;padding:20px;text-align:center;background:#f5fbfe}
 .fileinput{width:100%;margin-top:10px}
-.progress{height:9px;background:#dfe9ef;border-radius:999px;overflow:hidden;margin-top:12px}
-.bar{height:100%;width:0;background:linear-gradient(90deg,#60bde8,#3497d1);transition:width .12s}
-.filelist{margin-top:14px;border-top:1px solid #e3ebef}
-.file{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 1px;border-bottom:1px solid #e8eef2}
-.name{font-weight:650;overflow-wrap:anywhere}.size{font-size:12px;color:var(--muted);margin-top:3px}
-.actions{display:flex;gap:6px}.actions button{padding:8px 9px;font-size:12px}
-textarea{width:100%;min-height:120px;border:1px solid #b8cbd7;border-radius:12px;padding:12px;resize:vertical;font:inherit;color:var(--text)}
-.remote{display:grid;grid-template-columns:repeat(3,58px);gap:7px;justify-content:center;margin:18px 0}
-.remote button{height:52px}.remote .blank{visibility:hidden}
-.abxy{display:grid;grid-template-columns:repeat(2,70px);gap:8px;justify-content:center;margin-top:15px}
-.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(25px);background:#263640;color:#fff;padding:10px 15px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:.2s;max-width:90%;text-align:center}
+.progress{height:8px;background:#dfeaf0;border-radius:999px;overflow:hidden;margin-top:12px}
+.bar{height:100%;width:0;background:linear-gradient(90deg,#59c3f4,#0782d5);transition:width .12s}
+.filelist{margin-top:14px;border-top:1px solid #e4ecef}
+.file{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:13px 1px;border-bottom:1px solid #e8eef1}
+.name{font-weight:700;overflow-wrap:anywhere}.size{font-size:12px;color:var(--muted);margin-top:3px}
+.actions{display:flex;gap:6px}.actions button{padding:8px 10px;font-size:12px}
+textarea{min-height:120px;resize:vertical}
+.remote{display:grid;grid-template-columns:repeat(3,60px);gap:8px;justify-content:center;margin:18px 0}
+.remote button{height:54px}.remote .blank{visibility:hidden}
+.abxy{display:grid;grid-template-columns:repeat(2,72px);gap:8px;justify-content:center;margin-top:15px}
+.toast{
+ position:fixed;z-index:50;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));
+ transform:translateX(-50%) translateY(22px);background:#152630eF;color:#fff;
+ padding:11px 16px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;
+ transition:.2s;max-width:90%;text-align:center;box-shadow:0 10px 28px #1a2c3660
+}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 20px}
 .lock{color:#a2631e}
-@media(max-width:420px){h1{font-size:25px}.actions{flex-direction:column}.file{grid-template-columns:1fr auto}#liveCamera{min-height:180px}}
+#liveCamera{box-shadow:inset 0 0 0 1px #ffffff16}
+@media(max-width:420px){.actions{flex-direction:column}.file{grid-template-columns:1fr auto}#liveCamera{min-height:180px}}
 </style>
 </head>
 <body>
 <header>
   <div class="wrap headrow">
-    <div><h1>3DS Link</h1><div class="small">Pont local iPhone ↔ Nintendo 3DS</div></div>
-    <div class="small">v1.0</div>
+    <div class="brand">
+      <div class="appicon">3</div>
+      <div><h1>3DS Link</h1><div class="small">Nintendo 3DS • Local Link</div></div>
+    </div>
+    <div class="small">v1.1</div>
   </div>
 </header>
 
@@ -1211,8 +1268,8 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
     <h2>Camera</h2>
     <div class="muted">Flux léger en direct, commandes prioritaires et photos synchronisées avec la 3DS.</div>
 
-    <div style="margin-top:12px;background:#101416;border-radius:16px;padding:8px;position:relative;overflow:hidden">
-      <img id="liveCamera" style="display:block;width:100%;aspect-ratio:5/3;object-fit:contain;border-radius:10px;background:#090b0c" alt="Flux caméra 3DS">
+    <div style="margin-top:14px;background:#071016;border-radius:22px;padding:8px;position:relative;overflow:hidden;box-shadow:0 15px 28px #0a27363a">
+      <img id="liveCamera" style="display:block;width:100%;aspect-ratio:5/3;object-fit:contain;border-radius:16px;background:#05090b" alt="Flux caméra 3DS">
       <div id="liveBadge" style="position:absolute;left:18px;top:18px;background:#d64048;color:#fff;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800">LIVE</div>
     </div>
 
@@ -1227,10 +1284,10 @@ footer{text-align:center;color:var(--muted);font-size:12px;padding:5px 15px 25px
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v1.0 ajoute Camera Link : capture multiple sur la 3DS et transfert automatique vers cette page.</p>
+    <p class="muted">La v1.1 harmonise l’interface 3DS/iPhone et corrige la colorimétrie du flux caméra.</p>
   </section>
 
-  <footer>3DS Link v1.0 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v1.1 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1789,6 +1846,28 @@ void handleClient(sockaddr_in& client) {
         return;
     }
 
+    if (route == "/manifest.webmanifest" && method == "GET") {
+        sendSimple(
+            clientSocket,
+            200,
+            "OK",
+            "{\"name\":\"3DS Link\",\"short_name\":\"3DS Link\",\"start_url\":\"/\",\"display\":\"standalone\",\"background_color\":\"#edf4f8\",\"theme_color\":\"#0b84d8\",\"icons\":[{\"src\":\"/app-icon.svg\",\"sizes\":\"any\",\"type\":\"image/svg+xml\"}]}",
+            "application/manifest+json"
+        );
+        return;
+    }
+
+    if (route == "/app-icon.svg" && method == "GET") {
+        sendSimple(
+            clientSocket,
+            200,
+            "OK",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\"><defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop stop-color=\"#58c7f5\"/><stop offset=\"1\" stop-color=\"#087bd0\"/></linearGradient></defs><rect width=\"512\" height=\"512\" rx=\"116\" fill=\"url(#g)\"/><rect x=\"87\" y=\"134\" width=\"338\" height=\"244\" rx=\"52\" fill=\"white\" opacity=\".96\"/><circle cx=\"172\" cy=\"256\" r=\"42\" fill=\"#0b84d8\"/><circle cx=\"340\" cy=\"222\" r=\"18\" fill=\"#0b84d8\"/><circle cx=\"382\" cy=\"264\" r=\"18\" fill=\"#0b84d8\"/><path d=\"M150 328h212\" stroke=\"#8ed2f3\" stroke-width=\"24\" stroke-linecap=\"round\"/></svg>",
+            "image/svg+xml"
+        );
+        return;
+    }
+
     if (!authorized(headers)) {
         sendSimple(clientSocket, 401, "Unauthorized", "{\"error\":\"pin\"}", "application/json");
         lastAction = "Tentative refusee : PIN incorrect";
@@ -2004,12 +2083,12 @@ void drawHomeTopScreen() {
     C2D_TargetClear(topTarget, COLOR_BG_TOP);
     C2D_SceneBegin(topTarget);
 
-    C2D_DrawRectSolid(0, 0, 0.1f, 400, 43, COLOR_BLUE);
-    C2D_DrawRectSolid(0, 0, 0.2f, 400, 3, COLOR_BLUE_LIGHT);
+    C2D_DrawRectSolid(0, 0, 0.1f, 400, 43, C2D_Color32(28, 44, 56, 255));
+    C2D_DrawRectSolid(0, 0, 0.2f, 400, 3, C2D_Color32(81, 190, 240, 255));
     C2D_DrawRectSolid(0, 42, 0.2f, 400, 1, COLOR_BLUE_DARK);
 
     drawText("3DS Link", 16, 8, 0.72f, COLOR_WHITE);
-    drawText("v1.0", 348, 11, 0.40f, COLOR_WHITE);
+    drawText("v1.1", 348, 11, 0.40f, COLOR_WHITE);
 
     // QR code : grande zone blanche avec quiet-zone standard.
     drawRoundedRect(12, 54, 164, 174, 14, COLOR_SHADOW, 0.15f);
@@ -2062,8 +2141,8 @@ void drawHomeBottomScreen() {
     C2D_TargetClear(bottomTarget, COLOR_BG_BOTTOM);
     C2D_SceneBegin(bottomTarget);
 
-    C2D_DrawRectSolid(0, 0, 0.1f, 320, 34, COLOR_BLUE);
-    drawText("Activite iPhone", 13, 7, 0.56f, COLOR_WHITE);
+    C2D_DrawRectSolid(0, 0, 0.1f, 320, 34, C2D_Color32(28, 44, 56, 255));
+    drawText("3DS Link  •  iPhone", 13, 7, 0.50f, COLOR_WHITE);
 
     drawRoundedRect(10, 46, 300, 64, 12, COLOR_WHITE, 0.2f);
     C2D_DrawRectSolid(10, 109, 0.25f, 300, 1, COLOR_LINE);
@@ -2096,15 +2175,16 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v1.0", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v1.1", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
     C2D_TargetClear(bottomTarget, C2D_Color32(236, 241, 244, 255));
     C2D_SceneBegin(bottomTarget);
 
-    C2D_DrawRectSolid(0, 0, 0.1f, 320, 37, COLOR_BLUE);
-    drawText("Appareil photo", 13, 8, 0.56f, COLOR_WHITE);
+    C2D_DrawRectSolid(0, 0, 0.1f, 320, 37, C2D_Color32(28, 44, 56, 255));
+    C2D_DrawCircleSolid(294, 18, 0.3f, 5, COLOR_GREEN);
+    drawText("Camera Link", 13, 8, 0.54f, COLOR_WHITE);
 
     drawRoundedRect(11, 50, 298, 55, 12, COLOR_WHITE, 0.2f);
     drawText("Photos de la session", 24, 61, 0.43f, COLOR_TEXT);
