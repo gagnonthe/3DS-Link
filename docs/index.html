@@ -37,55 +37,241 @@ nav button{background:transparent;color:#5c6962;border:0;box-shadow:none;padding
 </style>
 </head>
 <body>
-<header><div class="wrap brand"><div class="icon">3</div><div><h1>3DS Link</h1><div class="sub">Companion iPhone • GitHub Pages</div></div></div></header>
+<header><div class="wrap brand"><div class="icon">3</div><div><h1>3DS Link</h1><div class="sub">Companion iPhone • v1.5</div></div></div></header>
 <main class="wrap">
 <section id="home" class="panel active">
   <div class="card">
-    <div class="row"><div><div class="status"><span id="dot" class="dot"></span><span id="status">Aucune 3DS associée</span></div><div id="lastSeen" class="sub" style="margin-top:4px"></div></div><button class="secondary" onclick="forget()">Oublier</button></div>
-    <div id="pairInfo" class="code" style="margin-top:12px">Scanne le QR affiché par 3DS Link.</div>
-    <div class="toolbar"><button onclick="connect()">Se connecter</button><button class="secondary" onclick="openLocal()">Ouvrir le portail local</button></div>
-    <div id="mixed" class="notice" hidden>Safari bloque peut-être les requêtes HTTPS → HTTP local. Le bouton « Ouvrir le portail local » reste disponible.</div>
+    <div class="row">
+      <div>
+        <div class="status"><span id="dot" class="dot"></span><span id="status">Aucune 3DS associée</span></div>
+        <div id="lastSeen" class="sub" style="margin-top:5px">Scanne le QR de 3DS Link.</div>
+      </div>
+      <button class="secondary" onclick="forget()">Oublier</button>
+    </div>
+
+    <div id="pairInfo" class="code" style="margin-top:12px">Aucune console enregistrée</div>
+
+    <div id="modeBox" class="notice" style="display:none"></div>
+
+    <div class="toolbar">
+      <button id="connectBtn" onclick="connect(true)">Se connecter</button>
+      <button class="secondary" onclick="openLocal('files')">Ouvrir ma 3DS</button>
+    </div>
   </div>
-  <div class="card"><strong>Raccourcis</strong><div class="grid">
-    <div class="tile" onclick="show('camera')"><strong>📷 Camera Link</strong><span>Flux, photo, plein écran</span></div>
-    <div class="tile" onclick="openLocal()"><strong>📁 Fichiers</strong><span>Interface locale 3DS</span></div>
-    <div class="tile" onclick="openLocal()"><strong>⌨️ Clavier</strong><span>Saisie vers la console</span></div>
-    <div class="tile" onclick="openLocal()"><strong>🎮 Remote</strong><span>Télécommande</span></div>
-  </div></div>
+
+  <div class="card">
+    <div class="row"><strong>Actions rapides</strong><span id="latency" class="sub"></span></div>
+    <div class="grid">
+      <div class="tile" onclick="openCameraSmart()"><strong>📷 Camera Link</strong><span>Flux, photo et plein écran</span></div>
+      <div class="tile" onclick="openLocal('files')"><strong>📁 Fichiers</strong><span>Explorateur local</span></div>
+      <div class="tile" onclick="openLocal('text')"><strong>⌨️ Clavier</strong><span>Écrire depuis l’iPhone</span></div>
+      <div class="tile" onclick="openLocal('remote')"><strong>🎮 Remote</strong><span>Télécommande</span></div>
+    </div>
+  </div>
 </section>
+
 <section id="camera" class="panel">
   <div class="card">
-    <div class="row"><div><strong>Camera Link</strong><div class="sub">Flux léger de la 3DS</div></div><button class="secondary" onclick="openFullscreen()">⛶ Plein écran</button></div>
+    <div class="row">
+      <div><strong>Camera Link</strong><div id="cameraMode" class="sub">Connexion à la 3DS…</div></div>
+      <button class="secondary" onclick="openFullscreen()">⛶ Plein écran</button>
+    </div>
     <div class="cameraBox"><img id="live" alt="Flux caméra"><span class="badge">LIVE</span></div>
     <div id="cameraState" class="sub" style="margin-top:8px">En attente…</div>
-    <div class="toolbar"><button class="yellow" onclick="capture()">📷 Prendre une photo</button><button class="secondary" onclick="openLocal()">Portail 3DS</button></div>
+    <div class="toolbar">
+      <button class="yellow" onclick="capture()">📷 Prendre une photo</button>
+      <button class="secondary" onclick="openLocal('camera')">Mode local</button>
+    </div>
   </div>
 </section>
-<section id="settings" class="panel"><div class="card"><strong>Console associée</strong><div id="settingsData" class="code" style="margin-top:10px">Aucune</div><small>Les informations sont enregistrées uniquement sur cet iPhone.</small></div></section>
+
+<section id="settings" class="panel">
+  <div class="card">
+    <div class="row"><strong>Ma Nintendo 3DS</strong><span id="consoleDot" class="dot"></span></div>
+    <div id="settingsData" class="code" style="margin-top:10px">Aucune console associée</div>
+    <div class="toolbar">
+      <button class="secondary" onclick="renameConsole()">Renommer</button>
+      <button class="secondary" onclick="connect(false)">Tester la liaison</button>
+    </div>
+    <small>IP, PIN et préférences sont enregistrés uniquement sur cet iPhone.</small>
+  </div>
+</section>
 </main>
-<nav><button id="nav-home" class="active" onclick="show('home')">Accueil</button><button id="nav-camera" onclick="show('camera')">Caméra</button><button id="nav-settings" onclick="show('settings')">Console</button></nav>
-<div id="fullscreen"><div class="fsTop"><strong>● LIVE • 3DS Link</strong><button class="secondary" onclick="closeFullscreen()">Fermer</button></div><img id="liveFs" alt="Flux caméra plein écran"><div class="fsControls"><button class="shutter" onclick="capture()"></button></div></div>
+
+<nav>
+<button id="nav-home" class="active" onclick="show('home')">Accueil</button>
+<button id="nav-camera" onclick="show('camera')">Caméra</button>
+<button id="nav-settings" onclick="show('settings')">Console</button>
+</nav>
+
+<div id="fullscreen">
+  <div class="fsTop"><strong>● LIVE • 3DS Link</strong><button class="secondary" onclick="closeFullscreen()">Fermer</button></div>
+  <img id="liveFs" alt="Flux caméra plein écran">
+  <div class="fsControls"><button class="shutter" onclick="capture()"></button></div>
+</div>
+
 <script>
-const KEY='3dsLinkPairV1';let pair=loadPair();let busy=false,timer=null,lastObjectUrl='';
-function parsePairFromHash(){const raw=location.hash.replace(/^#/,'');if(!raw)return null;
-  // v1.4.1 compact: #192.168.0.103,5892
-  if(raw.includes(',')&&!raw.includes('=')){const parts=raw.split(',');if(parts.length===2&&parts[0]&&/^\d{4}$/.test(parts[1]))return {host:parts[0],port:'8080',pin:parts[1],pairedAt:Date.now()}}
-  // Compatibilité ancien QR v1.4
-  const p=new URLSearchParams(raw);const host=p.get('h'),port=p.get('p')||'8080',pin=p.get('k');if(!host||!pin)return null;return {host,port,pin,pairedAt:Date.now()}}
+const KEY='3dsLinkPairV2';
+let pair=loadPair();
+let busy=false,timer=null,lastObjectUrl='',directOK=false;
+let fallbackTimer=null;
+
+function parsePairFromHash(){
+  const raw=location.hash.replace(/^#/,'');
+  if(!raw)return null;
+  if(raw.includes(',')&&!raw.includes('=')){
+    const parts=raw.split(',');
+    if(parts.length===2&&parts[0]&&/^\d{4}$/.test(parts[1]))
+      return {host:parts[0],port:'8080',pin:parts[1],name:'Ma Nintendo 3DS',pairedAt:Date.now(),lastSeen:0,mode:'unknown'};
+  }
+  const p=new URLSearchParams(raw),host=p.get('h'),port=p.get('p')||'8080',pin=p.get('k');
+  if(!host||!pin)return null;
+  return {host,port,pin,name:'Ma Nintendo 3DS',pairedAt:Date.now(),lastSeen:0,mode:'unknown'};
+}
 function loadPair(){try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}}
-function savePair(p){pair=p;localStorage.setItem(KEY,JSON.stringify(p));history.replaceState(null,'',location.pathname);render()}
-function forget(){localStorage.removeItem(KEY);pair=null;render()}
+function persist(){if(pair)localStorage.setItem(KEY,JSON.stringify(pair))}
+function savePair(p){
+  const previous=loadPair();
+  if(previous&&previous.host===p.host){p.name=previous.name||p.name}
+  pair=p;persist();history.replaceState(null,'',location.pathname);render()
+}
+function forget(){
+  stopCamera();clearTimeout(fallbackTimer);localStorage.removeItem(KEY);pair=null;directOK=false;render()
+}
 function base(){return pair?`http://${pair.host}:${pair.port}`:''}
-function headers(){return pair?{'X-3DS-Link-Pin':pair.pin}:{}}
-function render(){const ok=!!pair;document.getElementById('status').textContent=ok?'Nintendo 3DS associée':'Aucune 3DS associée';document.getElementById('dot').className='dot'+(ok?' ok':'');document.getElementById('pairInfo').textContent=ok?`${pair.host}:${pair.port} • PIN enregistré`:'Scanne le QR affiché par 3DS Link.';document.getElementById('settingsData').textContent=ok?`Hôte : ${pair.host}\nPort : ${pair.port}\nPIN : ••••\nAssociation : ${new Date(pair.pairedAt).toLocaleString()}`:'Aucune console associée'}
-function show(id){document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.getElementById('nav-'+id).classList.add('active');if(id==='camera')startCamera();else stopCamera()}
-async function connect(){if(!pair){alert('Scanne d’abord le QR de la 3DS.');return}try{const r=await fetch(base()+'/api/camera?t='+Date.now(),{headers:headers(),cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);document.getElementById('status').textContent='3DS connectée';document.getElementById('mixed').hidden=true;document.getElementById('lastSeen').textContent='Connexion directe disponible'}catch(e){document.getElementById('mixed').hidden=false;document.getElementById('lastSeen').textContent='Connexion directe bloquée ou console indisponible'}}
-function openLocal(){if(!pair){alert('Aucune 3DS associée.');return}location.href=base()+'/#pin='+encodeURIComponent(pair.pin)}
-async function frame(){if(busy||!pair)return;busy=true;try{const r=await fetch(base()+'/camera/live.bmp?t='+Date.now(),{headers:headers(),cache:'no-store'});if(!r.ok)throw new Error('Flux '+r.status);const blob=await r.blob();const u=URL.createObjectURL(blob);document.getElementById('live').src=u;document.getElementById('liveFs').src=u;if(lastObjectUrl)URL.revokeObjectURL(lastObjectUrl);lastObjectUrl=u;document.getElementById('cameraState').textContent='LIVE • liaison directe';document.getElementById('mixed').hidden=true}catch(e){document.getElementById('cameraState').textContent='Flux direct bloqué ou indisponible';document.getElementById('mixed').hidden=false}finally{busy=false}}
-function startCamera(){stopCamera();frame();timer=setInterval(frame,260)}function stopCamera(){if(timer)clearInterval(timer);timer=null}
-async function capture(){if(!pair)return;try{const r=await fetch(base()+'/api/camera/capture',{method:'POST',headers:headers(),cache:'no-store'});document.getElementById('cameraState').textContent=r.ok?'Déclenchement envoyé':'Capture refusée'}catch(e){document.getElementById('cameraState').textContent='Commande bloquée par Safari'}}
-function openFullscreen(){document.getElementById('fullscreen').classList.add('open');startCamera()}function closeFullscreen(){document.getElementById('fullscreen').classList.remove('open')}
-const fromQr=parsePairFromHash();if(fromQr)savePair(fromQr);else render();if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+function headers(){return pair?{'X-3DS-Link-Pin':String(pair.pin)}:{}}
+function fmtDate(t){return t?new Date(t).toLocaleString():'Jamais'}
+
+function render(){
+  const ok=!!pair;
+  document.getElementById('status').textContent=ok?(pair.name||'Nintendo 3DS'):'Aucune 3DS associée';
+  document.getElementById('dot').className='dot'+(directOK?' ok':'');
+  document.getElementById('consoleDot').className='dot'+(directOK?' ok':'');
+  document.getElementById('pairInfo').textContent=ok?`${pair.host}:${pair.port} • PIN enregistré`:'Scanne le QR affiché par 3DS Link.';
+  document.getElementById('lastSeen').textContent=ok?(directOK?'Connexion directe active':`Dernier contact : ${fmtDate(pair.lastSeen)}`):'Scanne le QR de 3DS Link.';
+  document.getElementById('settingsData').textContent=ok?
+    `Nom : ${pair.name||'Ma Nintendo 3DS'}\nAdresse : ${pair.host}:${pair.port}\nPIN : ••••\nMode : ${pair.mode==='direct'?'PWA directe':pair.mode==='local'?'Portail local':'À tester'}\nDernier contact : ${fmtDate(pair.lastSeen)}\nAssociation : ${fmtDate(pair.pairedAt)}`:
+    'Aucune console associée';
+}
+function setMode(text,type='info'){
+  const b=document.getElementById('modeBox');
+  b.style.display='block';b.textContent=text;
+  if(type==='ok'){b.style.background='#e8f6ed';b.style.borderColor='#8bc9a1';b.style.color='#315e40'}
+  else if(type==='warn'){b.style.background='#fff8d7';b.style.borderColor='#ead47a';b.style.color='#7a6733'}
+  else{b.style.background='#eef4f7';b.style.borderColor='#b9cdd8';b.style.color='#49606d'}
+}
+function show(id){
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.getElementById('nav-'+id).classList.add('active');
+  if(id==='camera') startCamera(); else stopCamera()
+}
+
+async function directProbe(timeoutMs=1300){
+  if(!pair)throw new Error('no pair');
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),timeoutMs);
+  const t0=performance.now();
+  try{
+    const r=await fetch(base()+'/api/camera?t='+Date.now(),{
+      headers:headers(),cache:'no-store',signal:controller.signal
+    });
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    await r.json();
+    return Math.max(1,Math.round(performance.now()-t0));
+  }finally{clearTimeout(timeout)}
+}
+
+async function connect(autoFallback=false){
+  if(!pair){alert('Scanne d’abord le QR de la 3DS.');return false}
+  clearTimeout(fallbackTimer);
+  document.getElementById('connectBtn').disabled=true;
+  setMode('Recherche de la 3DS sur le réseau local…');
+  try{
+    const ms=await directProbe();
+    directOK=true;pair.mode='direct';pair.lastSeen=Date.now();persist();
+    document.getElementById('latency').textContent=`${ms} ms`;
+    setMode(`Connexion directe active • ${ms} ms`,'ok');
+    render();return true;
+  }catch(e){
+    directOK=false;pair.mode='local';persist();render();
+    setMode('Safari ne permet pas la liaison directe. Passage sécurisé au portail local…','warn');
+    if(autoFallback){
+      fallbackTimer=setTimeout(()=>openLocal('files'),900);
+    }
+    return false;
+  }finally{
+    document.getElementById('connectBtn').disabled=false;
+  }
+}
+
+function openLocal(tab='files'){
+  if(!pair){alert('Aucune 3DS associée.');return}
+  pair.mode='local';persist();
+  const frag=new URLSearchParams({pin:String(pair.pin),tab});
+  location.href=base()+'/#'+frag.toString();
+}
+
+async function openCameraSmart(){
+  if(!pair){alert('Scanne d’abord le QR de la 3DS.');return}
+  if(directOK){show('camera');return}
+  const ok=await connect(false);
+  if(ok)show('camera'); else openLocal('camera');
+}
+
+async function frame(){
+  if(busy||!pair||!directOK)return;
+  busy=true;
+  try{
+    const r=await fetch(base()+'/camera/live.bmp?t='+Date.now(),{headers:headers(),cache:'no-store'});
+    if(!r.ok)throw new Error('Flux '+r.status);
+    const blob=await r.blob(),u=URL.createObjectURL(blob);
+    document.getElementById('live').src=u;document.getElementById('liveFs').src=u;
+    if(lastObjectUrl)URL.revokeObjectURL(lastObjectUrl);lastObjectUrl=u;
+    document.getElementById('cameraState').textContent='LIVE • liaison directe';
+    document.getElementById('cameraMode').textContent='PWA directe';
+    pair.lastSeen=Date.now();persist();
+  }catch(e){
+    document.getElementById('cameraState').textContent='Flux interrompu';
+    directOK=false;render();stopCamera();
+  }finally{busy=false}
+}
+function startCamera(){
+  stopCamera();
+  if(!directOK){document.getElementById('cameraState').textContent='Utilise “Mode local” pour Camera Link';return}
+  frame();timer=setInterval(frame,260)
+}
+function stopCamera(){if(timer)clearInterval(timer);timer=null}
+async function capture(){
+  if(!pair)return;
+  if(!directOK){openLocal('camera');return}
+  try{
+    const r=await fetch(base()+'/api/camera/capture',{method:'POST',headers:headers(),cache:'no-store'});
+    document.getElementById('cameraState').textContent=r.ok?'Déclenchement envoyé':'Capture refusée';
+    if(r.ok){pair.lastSeen=Date.now();persist()}
+  }catch(e){
+    directOK=false;render();document.getElementById('cameraState').textContent='Passage au mode local…';
+    setTimeout(()=>openLocal('camera'),500)
+  }
+}
+function openFullscreen(){document.getElementById('fullscreen').classList.add('open');startCamera()}
+function closeFullscreen(){document.getElementById('fullscreen').classList.remove('open')}
+function renameConsole(){
+  if(!pair)return;
+  const name=prompt('Nom de cette 3DS',pair.name||'Ma Nintendo 3DS');
+  if(name&&name.trim()){pair.name=name.trim().slice(0,30);persist();render()}
+}
+
+const fromQr=parsePairFromHash();
+if(fromQr){
+  savePair(fromQr);
+  setTimeout(()=>connect(true),450);
+}else{
+  render();
+  if(pair&&pair.mode==='direct')setTimeout(()=>connect(false),500);
+}
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script>
 </body>
 </html>

@@ -241,6 +241,11 @@ void sendSimple(
         "Content-Type: %s\r\n"
         "Content-Length: %u\r\n"
         "Cache-Control: no-store\r\n"
+        "Access-Control-Allow-Origin: https://gagnonthe.github.io\r\n"
+        "Access-Control-Allow-Headers: X-3DS-Link-Pin, Content-Type\r\n"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        "Access-Control-Allow-Private-Network: true\r\n"
+        "Vary: Origin\r\n"
         "Connection: close\r\n\r\n",
         code,
         reason,
@@ -751,6 +756,11 @@ bool sendCameraPreviewBmp(int sock, const u8* source, int outWidth = 160, int ou
         "Content-Type: image/bmp\r\n"
         "Content-Length: %u\r\n"
         "Cache-Control: no-store, no-cache, must-revalidate\r\n"
+        "Access-Control-Allow-Origin: https://gagnonthe.github.io\r\n"
+        "Access-Control-Allow-Headers: X-3DS-Link-Pin, Content-Type\r\n"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        "Access-Control-Allow-Private-Network: true\r\n"
+        "Vary: Origin\r\n"
         "Connection: close\r\n\r\n",
         fileBytes
     );
@@ -1237,7 +1247,7 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
       <div class="appicon">3</div>
       <div><h1>3DS Link</h1><div class="small">3DS-style Companion • Local Link</div></div>
     </div>
-    <div class="small">v1.4.1</div>
+    <div class="small">v1.5</div>
   </div>
 </header>
 
@@ -1320,10 +1330,10 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v1.4.1 ajoute le launcher tactile, restaure le QR et améliore l’interface 3DS Link.</p>
+    <p class="muted">La v1.5 ajoute l’association automatique PWA, CORS local et reconnexion intelligente.</p>
   </section>
 
-  <footer>3DS Link v1.4.1 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v1.5 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -1332,6 +1342,15 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
 let pin = localStorage.getItem('3dsLinkPin') || '';
 const $ = id => document.getElementById(id);
 
+// Handoff depuis la PWA : http://IP:8080/#pin=1234&tab=camera
+const handoff = new URLSearchParams(location.hash.replace(/^#/,''));
+const handoffPin = handoff.get('pin') || '';
+const handoffTab = handoff.get('tab') || '';
+if(/^\d{4}$/.test(handoffPin)){
+  pin = handoffPin;
+  localStorage.setItem('3dsLinkPin', pin);
+  history.replaceState(null,'',location.pathname);
+}
 if(pin) $('pin').value = pin;
 
 function headers(extra={}) {
@@ -1362,6 +1381,18 @@ async function unlock() {
     $('authState').className='muted';
     renderFiles(await r.json());
     toast('Connecté à la 3DS');
+
+    if(handoffTab){
+      const map={files:'Fichiers',text:'Clavier',remote:'Remote',camera:'Camera',info:'Infos'};
+      const wanted=map[handoffTab];
+      if(wanted){
+        const btn=[...document.querySelectorAll('.tab')].find(b=>b.textContent.trim()===wanted);
+        if(btn){
+          btn.click();
+          if(handoffTab==='camera'){startCameraLive();loadCamera(true)}
+        }
+      }
+    }
   }catch(e){
     $('authState').textContent=e.message;
     $('authState').className='muted lock';
@@ -1775,7 +1806,7 @@ bool sendFileFromDirectory(int sock, const char* directory, const std::string& n
     char header[512];
     const int headerLength = std::snprintf(
         header, sizeof(header),
-        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %ld\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: https://gagnonthe.github.io\r\nAccess-Control-Allow-Headers: X-3DS-Link-Pin, Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Private-Network: true\r\nConnection: close\r\n\r\n",
         contentType, size
     );
     if (headerLength <= 0 || !sendAll(sock, header, static_cast<size_t>(headerLength))) {
@@ -1820,6 +1851,10 @@ bool sendDownload(int sock, const std::string& name) {
         "Content-Length: %ld\r\n"
         "Content-Disposition: attachment; filename=\"%s\"\r\n"
         "Cache-Control: no-store\r\n"
+        "Access-Control-Allow-Origin: https://gagnonthe.github.io\r\n"
+        "Access-Control-Allow-Headers: X-3DS-Link-Pin, Content-Type\r\n"
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
+        "Access-Control-Allow-Private-Network: true\r\n"
         "Connection: close\r\n\r\n",
         size,
         safe.c_str()
@@ -1869,6 +1904,11 @@ void handleClient(sockaddr_in& client) {
     clientSeen = true;
     ++requestCount;
     lastClient = inet_ntoa(client.sin_addr);
+
+    if (method == "OPTIONS") {
+        sendSimple(clientSocket, 204, "No Content", "");
+        return;
+    }
 
     if (route == "/" && method == "GET") {
         const std::string page = makeWebPage();
@@ -2216,7 +2256,7 @@ void drawHomeTopScreen() {
     C2D_DrawCircleSolid(281, 13, 0.5f, 5, serverReady ? COLOR_GREEN : COLOR_RED);
     drawText(serverReady ? "Connecte" : "Hors ligne", 292, 5, 0.33f,
              serverReady ? C2D_Color32(33, 126, 66, 255) : COLOR_RED);
-    drawText("v1.4.1", 350, 5, 0.29f, COLOR_TEXT);
+    drawText("v1.5", 350, 5, 0.29f, COLOR_TEXT);
 
     // Carte gauche : fonction sélectionnée.
     drawRoundedRect(13, 38, 225, 153, 14, COLOR_WHITE, 0.20f);
@@ -2303,7 +2343,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v1.4.1", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v1.5", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
