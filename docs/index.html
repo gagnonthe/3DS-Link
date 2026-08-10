@@ -67,7 +67,11 @@ nav button{background:transparent;color:#5c6962;border:0;box-shadow:none;padding
 <div id="fullscreen"><div class="fsTop"><strong>● LIVE • 3DS Link</strong><button class="secondary" onclick="closeFullscreen()">Fermer</button></div><img id="liveFs" alt="Flux caméra plein écran"><div class="fsControls"><button class="shutter" onclick="capture()"></button></div></div>
 <script>
 const KEY='3dsLinkPairV1';let pair=loadPair();let busy=false,timer=null,lastObjectUrl='';
-function parsePairFromHash(){const raw=location.hash.replace(/^#/,'');if(!raw)return null;const p=new URLSearchParams(raw);const host=p.get('h'),port=p.get('p')||'8080',pin=p.get('k');if(!host||!pin)return null;return {host,port,pin,pairedAt:Date.now()}}
+function parsePairFromHash(){const raw=location.hash.replace(/^#/,'');if(!raw)return null;
+  // v1.4.1 compact: #192.168.0.103,5892
+  if(raw.includes(',')&&!raw.includes('=')){const parts=raw.split(',');if(parts.length===2&&parts[0]&&/^\d{4}$/.test(parts[1]))return {host:parts[0],port:'8080',pin:parts[1],pairedAt:Date.now()}}
+  // Compatibilité ancien QR v1.4
+  const p=new URLSearchParams(raw);const host=p.get('h'),port=p.get('p')||'8080',pin=p.get('k');if(!host||!pin)return null;return {host,port,pin,pairedAt:Date.now()}}
 function loadPair(){try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}}
 function savePair(p){pair=p;localStorage.setItem(KEY,JSON.stringify(p));history.replaceState(null,'',location.pathname);render()}
 function forget(){localStorage.removeItem(KEY);pair=null;render()}

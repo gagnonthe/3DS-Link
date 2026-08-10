@@ -47,12 +47,12 @@ constexpr u32 COLOR_BG_BOTTOM   = C2D_Color32(240, 244, 247, 255);
 constexpr u32 COLOR_BLUE        = C2D_Color32(69, 158, 214, 255);
 constexpr u32 COLOR_BLUE_DARK   = C2D_Color32(29, 109, 169, 255);
 constexpr u32 COLOR_BLUE_LIGHT  = C2D_Color32(126, 201, 238, 255);
-constexpr u32 COLOR_TEXT        = C2D_Color32(43, 57, 67, 255);
-constexpr u32 COLOR_MUTED       = C2D_Color32(105, 119, 129, 255);
+constexpr u32 COLOR_TEXT        = C2D_Color32(18, 22, 25, 255);
+constexpr u32 COLOR_MUTED       = C2D_Color32(58, 66, 71, 255);
 constexpr u32 COLOR_WHITE       = C2D_Color32(255, 255, 255, 255);
 constexpr u32 COLOR_GREEN       = C2D_Color32(57, 176, 103, 255);
 constexpr u32 COLOR_RED         = C2D_Color32(202, 73, 79, 255);
-constexpr u32 COLOR_ORANGE      = C2D_Color32(224, 145, 55, 255);
+constexpr u32 COLOR_ORANGE      = C2D_Color32(176, 91, 18, 255);
 constexpr u32 COLOR_SHADOW      = C2D_Color32(65, 80, 92, 42);
 constexpr u32 COLOR_LINE        = C2D_Color32(197, 210, 219, 255);
 
@@ -122,10 +122,10 @@ std::string connectionUrl() {
 }
 
 std::string pairingUrl() {
-    return "https://gagnonthe.github.io/3DS-Link/#h=" +
-           localIp +
-           "&p=" + std::to_string(PORT) +
-           "&k=" + std::to_string(pinCode);
+    // Format compact pour réduire fortement la densité du QR.
+    // Exemple : https://gagnonthe.github.io/3DS-Link/#192.168.0.103,5892
+    return "https://gagnonthe.github.io/3DS-Link/#" +
+           localIp + "," + std::to_string(pinCode);
 }
 
 void generateConnectionQr() {
@@ -1237,7 +1237,7 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
       <div class="appicon">3</div>
       <div><h1>3DS Link</h1><div class="small">3DS-style Companion • Local Link</div></div>
     </div>
-    <div class="small">v1.4</div>
+    <div class="small">v1.4.1</div>
   </div>
 </header>
 
@@ -1320,10 +1320,10 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v1.4 ajoute le launcher tactile, restaure le QR et améliore l’interface 3DS Link.</p>
+    <p class="muted">La v1.4.1 ajoute le launcher tactile, restaure le QR et améliore l’interface 3DS Link.</p>
   </section>
 
-  <footer>3DS Link v1.4 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v1.4.1 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -2205,102 +2205,95 @@ void drawTwilightTile(int index, float x, float y, bool selected) {
 }
 
 void drawHomeTopScreen() {
-    C2D_TargetClear(topTarget, C2D_Color32(240, 243, 238, 255));
+    C2D_TargetClear(topTarget, C2D_Color32(238, 241, 237, 255));
     C2D_SceneBegin(topTarget);
 
-    // Barre système fine
-    C2D_DrawRectSolid(0, 0, 0.10f, 400, 25, C2D_Color32(248, 250, 247, 255));
-    C2D_DrawRectSolid(0, 24, 0.12f, 400, 1, C2D_Color32(190, 198, 194, 255));
+    // Barre supérieure à fort contraste.
+    C2D_DrawRectSolid(0, 0, 0.10f, 400, 27, C2D_Color32(250, 251, 249, 255));
+    C2D_DrawRectSolid(0, 26, 0.12f, 400, 1, C2D_Color32(155, 163, 158, 255));
 
-    drawText("3DS Link", 13, 4, 0.43f, COLOR_TEXT);
-    C2D_DrawCircleSolid(286, 12, 0.5f, 4, serverReady ? COLOR_GREEN : COLOR_RED);
-    drawText(serverReady ? "Connecte" : "Hors ligne", 296, 5, 0.29f,
-             serverReady ? COLOR_GREEN : COLOR_RED);
-    drawText("v1.4", 359, 5, 0.29f, COLOR_MUTED);
+    drawText("3DS Link", 12, 4, 0.48f, COLOR_TEXT);
+    C2D_DrawCircleSolid(281, 13, 0.5f, 5, serverReady ? COLOR_GREEN : COLOR_RED);
+    drawText(serverReady ? "Connecte" : "Hors ligne", 292, 5, 0.33f,
+             serverReady ? C2D_Color32(33, 126, 66, 255) : COLOR_RED);
+    drawText("v1.4.1", 350, 5, 0.29f, COLOR_TEXT);
 
-    // Carte principale
-    drawRoundedRect(17, 39, 366, 146, 15, C2D_Color32(203, 210, 206, 100), 0.15f);
-    drawRoundedRect(14, 36, 366, 146, 15, COLOR_WHITE, 0.20f);
+    // Carte gauche : fonction sélectionnée.
+    drawRoundedRect(13, 38, 225, 153, 14, COLOR_WHITE, 0.20f);
 
-    // Icône sélectionnée
-    drawRoundedRect(31, 55, 88, 88, 14, twilightTileColor(homeSelection), 0.35f);
-    drawTwilightIconGlyph(homeSelection, 75, 99, COLOR_WHITE);
+    drawRoundedRect(29, 54, 82, 82, 13, twilightTileColor(homeSelection), 0.35f);
+    drawTwilightIconGlyph(homeSelection, 70, 95, COLOR_WHITE);
 
-    drawText(HOME_NAMES[homeSelection], 136, 54, 0.57f, COLOR_TEXT);
+    drawText(HOME_NAMES[homeSelection], 126, 55, 0.57f, COLOR_TEXT);
 
-    // Description limitée pour laisser sa place au QR
     std::string desc = HOME_DESCRIPTIONS[homeSelection];
-    if (desc.size() > 27) desc.resize(27);
-    drawText(desc, 136, 84, 0.29f, COLOR_MUTED);
+    if (desc.size() > 28) desc.resize(28);
+    drawText(desc, 126, 87, 0.32f, COLOR_TEXT);
 
     if (serverReady) {
-        drawText(localIp + ":" + std::to_string(PORT), 136, 108, 0.27f, COLOR_BLUE_DARK);
-        drawText("PIN " + std::to_string(pinCode), 136, 128, 0.31f, COLOR_ORANGE);
-
-        // QR toujours visible : suffisamment grand pour Safari, sans masquer le launcher.
-        drawRoundedRect(278, 49, 91, 116, 10, C2D_Color32(235, 238, 235, 255), 0.31f);
-        drawRoundedRect(275, 46, 91, 116, 10, COLOR_WHITE, 0.34f);
-        drawCenteredText("PAIR", 320, 51, 0.25f, COLOR_MUTED);
-        drawConnectionQr(320, 108, 78.0f);
+        drawText(localIp + ":" + std::to_string(PORT), 126, 115, 0.31f, COLOR_TEXT);
+        drawText("PIN " + std::to_string(pinCode), 126, 139, 0.38f, COLOR_ORANGE);
+        drawText("Scanne le QR →", 126, 164, 0.29f, COLOR_MUTED);
     } else {
-        drawText("A pour relancer le serveur", 136, 120, 0.29f, COLOR_RED);
-        drawRoundedRect(277, 55, 88, 88, 12, C2D_Color32(238, 240, 238, 255), 0.31f);
-        drawCenteredText("QR", 321, 82, 0.46f, COLOR_MUTED);
-        drawCenteredText("indisponible", 321, 107, 0.24f, COLOR_MUTED);
+        drawText("Serveur indisponible", 126, 122, 0.31f, COLOR_RED);
+        drawText("A : reessayer", 126, 148, 0.31f, COLOR_TEXT);
     }
 
-    // Aide
-    C2D_DrawRectSolid(0, 204, 0.11f, 400, 36, C2D_Color32(246, 248, 245, 255));
-    C2D_DrawRectSolid(0, 204, 0.12f, 400, 1, C2D_Color32(196, 202, 198, 255));
-    drawText("◀ ▶ Choisir", 17, 214, 0.32f, COLOR_MUTED);
-    drawCenteredText("A Ouvrir", 200, 214, 0.35f, COLOR_TEXT);
-    drawText("Touchez l'ecran", 292, 214, 0.28f, COLOR_MUTED);
+    // Grande carte QR : modules >= 2 px, beaucoup plus fiable à scanner.
+    drawRoundedRect(248, 38, 141, 153, 14, COLOR_WHITE, 0.20f);
+    drawCenteredText("CONNEXION iPHONE", 318, 47, 0.25f, COLOR_TEXT);
+
+    if (serverReady && qrReady) {
+        drawConnectionQr(318, 116, 126.0f);
+        drawCenteredText("IP + PIN inclus", 318, 177, 0.24f, COLOR_MUTED);
+    } else {
+        drawCenteredText("QR", 318, 92, 0.50f, COLOR_MUTED);
+        drawCenteredText("indisponible", 318, 120, 0.28f, COLOR_MUTED);
+    }
+
+    C2D_DrawRectSolid(0, 204, 0.11f, 400, 36, C2D_Color32(248, 249, 247, 255));
+    C2D_DrawRectSolid(0, 204, 0.12f, 400, 1, C2D_Color32(150, 159, 154, 255));
+    drawText("< > Choisir", 16, 214, 0.35f, COLOR_TEXT);
+    drawCenteredText("A Ouvrir", 200, 214, 0.37f, COLOR_TEXT);
+    drawText("QR = connexion", 292, 214, 0.30f, COLOR_TEXT);
 }
 
 void drawHomeBottomScreen() {
-    C2D_TargetClear(bottomTarget, C2D_Color32(231, 235, 231, 255));
+    C2D_TargetClear(bottomTarget, C2D_Color32(229, 233, 229, 255));
     C2D_SceneBegin(bottomTarget);
 
-    C2D_DrawRectSolid(0, 0, 0.10f, 320, 31, C2D_Color32(247, 249, 246, 255));
-    C2D_DrawRectSolid(0, 30, 0.12f, 320, 1, C2D_Color32(184, 194, 189, 255));
-    drawCenteredText("3DS Link", 160, 5, 0.46f, COLOR_TEXT);
+    C2D_DrawRectSolid(0, 0, 0.10f, 320, 32, C2D_Color32(250, 251, 249, 255));
+    C2D_DrawRectSolid(0, 31, 0.12f, 320, 1, C2D_Color32(150, 159, 154, 255));
+    drawCenteredText("3DS Link", 160, 5, 0.49f, COLOR_TEXT);
 
     C2D_DrawCircleSolid(16, 15, 0.3f, 5, clientSeen ? COLOR_GREEN : COLOR_ORANGE);
-    drawText(clientSeen ? "iPhone connecte" : "En attente iPhone", 26, 6, 0.27f, COLOR_MUTED);
+    drawText(clientSeen ? "iPhone connecte" : "En attente iPhone", 26, 6, 0.30f, COLOR_TEXT);
 
-    // Bande d'instruction tactile
-    drawCenteredText("Touchez une icone pour la selectionner", 160, 42, 0.27f, COLOR_MUTED);
+    drawCenteredText("Touchez une icone", 160, 43, 0.31f, COLOR_TEXT);
 
     const float startX = 8.0f;
     const float gap = 63.0f;
     const float y = 78.0f;
-
     for (int i = 0; i < HOME_ITEM_COUNT; ++i) {
         drawTwilightTile(i, startX + gap * i, y, i == homeSelection);
     }
 
-    drawCenteredText(HOME_NAMES[homeSelection], 160, 145, 0.46f, COLOR_TEXT);
+    drawCenteredText(HOME_NAMES[homeSelection], 160, 145, 0.52f, COLOR_TEXT);
 
-    // Vrai bouton tactile Ouvrir
-    drawRoundedRect(34, 177, 252, 43, 12, C2D_Color32(188, 196, 191, 100), 0.20f);
     drawRoundedRect(31, 174, 252, 43, 12,
                     homeSelection == 3 ? C2D_Color32(75,170,226,255) : COLOR_WHITE,
                     0.24f);
     drawCenteredText(
         homeSelection == 3 ? "Ouvrir Camera Link" : "Afficher",
-        157,
-        184,
-        0.37f,
+        157, 184, 0.40f,
         homeSelection == 3 ? COLOR_WHITE : COLOR_TEXT
     );
 
     for (int i = 0; i < HOME_ITEM_COUNT; ++i) {
         C2D_DrawCircleSolid(
-            136 + i * 12,
-            229,
-            0.4f,
+            136 + i * 12, 229, 0.4f,
             i == homeSelection ? 4 : 2,
-            i == homeSelection ? C2D_Color32(79,158,212,255) : C2D_Color32(151,161,157,255)
+            i == homeSelection ? C2D_Color32(49,119,171,255) : C2D_Color32(92,100,96,255)
         );
     }
 }
@@ -2310,7 +2303,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v1.4", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v1.4.1", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
