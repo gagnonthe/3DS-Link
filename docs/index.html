@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#e9edea">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="3DS Link">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icon.svg">
+<title>3DS Link</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;color:#25342d;background:#e7ece8;--blue:#4ba9dd;--blue2:#2e8fc6;--green:#4ca66d;--yellow:#f3cf45;--line:#b9c4be;--muted:#6c7a73;--card:#f9faf8}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;padding:env(safe-area-inset-top) 0 calc(86px + env(safe-area-inset-bottom));background:#e7ece8;background-image:linear-gradient(#ffffff26 1px,transparent 1px),linear-gradient(90deg,#ffffff22 1px,transparent 1px);background-size:12px 12px}
+header{position:sticky;top:0;z-index:10;background:#f7f9f6f2;border-bottom:1px solid var(--line);padding:11px 14px}
+.wrap{max-width:760px;margin:auto}.brand{display:flex;align-items:center;gap:10px}.icon{width:42px;height:42px;border-radius:9px;background:var(--blue);display:grid;place-items:center;color:white;font-weight:900;font-size:20px;box-shadow:inset 0 1px #c7edff,0 2px #b1c5ce}
+h1{font-size:21px;margin:0}.sub{font-size:12px;color:var(--muted)}
+.card{margin:14px;background:var(--card);border:1px solid var(--line);border-radius:13px;box-shadow:0 3px #cbd3cf;padding:15px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}.status{display:inline-flex;align-items:center;gap:7px;font-weight:700}.dot{width:9px;height:9px;border-radius:50%;background:#c79237}.dot.ok{background:var(--green)}
+button{font:inherit;border:1px solid #3185ba;border-radius:9px;padding:11px 14px;font-weight:750;background:linear-gradient(#67bee9,#3d98d0);color:white;box-shadow:inset 0 1px #c6ecff,0 2px #bad0da}
+button.secondary{background:linear-gradient(#fff,#e8eeeb);color:#33463c;border-color:#b8c3bd;box-shadow:inset 0 1px white,0 2px #d0d7d3}
+button.yellow{background:linear-gradient(#ffe478,#edc82f);color:#4b431c;border-color:#d0ad1d}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+.tile{border:1px solid var(--line);border-radius:12px;background:#fff;padding:15px;min-height:105px;display:flex;flex-direction:column;justify-content:space-between}.tile strong{font-size:16px}.tile span{font-size:12px;color:var(--muted)}
+.cameraBox{margin-top:12px;background:#071016;border-radius:14px;padding:7px;position:relative;overflow:hidden}.cameraBox img{display:block;width:100%;aspect-ratio:5/3;object-fit:contain;border-radius:9px;background:#020607}
+.badge{position:absolute;left:16px;top:16px;background:#d64b54;color:#fff;border:2px solid #fff;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:900}
+.toolbar{display:flex;gap:8px;margin-top:10px}.toolbar button{flex:1}small{color:var(--muted)}
+#fullscreen{position:fixed;inset:0;z-index:100;background:#020607;display:none;flex-direction:column;padding:calc(env(safe-area-inset-top) + 10px) 10px calc(env(safe-area-inset-bottom) + 12px)}
+#fullscreen.open{display:flex}#fullscreen .fsTop{display:flex;justify-content:space-between;align-items:center;color:white;padding:3px 2px 9px}#fullscreen img{width:100%;height:100%;min-height:0;object-fit:contain;flex:1}
+#fullscreen .fsControls{display:flex;justify-content:center;gap:12px;padding-top:10px}#fullscreen .shutter{width:72px;height:72px;border-radius:50%;border:7px solid white;background:var(--blue);padding:0}
+nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));width:min(720px,calc(100% - 20px));background:#f6f8f5ee;border:1px solid #aeb9b3;border-radius:13px;box-shadow:0 4px #c1c9c5;padding:7px;display:grid;grid-template-columns:repeat(3,1fr);gap:5px}
+nav button{background:transparent;color:#5c6962;border:0;box-shadow:none;padding:9px 4px;font-size:12px}nav button.active{background:white;color:#28372f;border:2px solid var(--yellow)}
+.panel{display:none}.panel.active{display:block}.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere;background:#eef3f0;border-radius:8px;padding:9px}
+.notice{font-size:12px;color:#7a6733;background:#fff8d7;border:1px solid #ead47a;border-radius:9px;padding:10px;margin-top:10px}
+</style>
+</head>
+<body>
+<header><div class="wrap brand"><div class="icon">3</div><div><h1>3DS Link</h1><div class="sub">Companion iPhone • GitHub Pages</div></div></div></header>
+<main class="wrap">
+<section id="home" class="panel active">
+  <div class="card">
+    <div class="row"><div><div class="status"><span id="dot" class="dot"></span><span id="status">Aucune 3DS associée</span></div><div id="lastSeen" class="sub" style="margin-top:4px"></div></div><button class="secondary" onclick="forget()">Oublier</button></div>
+    <div id="pairInfo" class="code" style="margin-top:12px">Scanne le QR affiché par 3DS Link.</div>
+    <div class="toolbar"><button onclick="connect()">Se connecter</button><button class="secondary" onclick="openLocal()">Ouvrir le portail local</button></div>
+    <div id="mixed" class="notice" hidden>Safari bloque peut-être les requêtes HTTPS → HTTP local. Le bouton « Ouvrir le portail local » reste disponible.</div>
+  </div>
+  <div class="card"><strong>Raccourcis</strong><div class="grid">
+    <div class="tile" onclick="show('camera')"><strong>📷 Camera Link</strong><span>Flux, photo, plein écran</span></div>
+    <div class="tile" onclick="openLocal()"><strong>📁 Fichiers</strong><span>Interface locale 3DS</span></div>
+    <div class="tile" onclick="openLocal()"><strong>⌨️ Clavier</strong><span>Saisie vers la console</span></div>
+    <div class="tile" onclick="openLocal()"><strong>🎮 Remote</strong><span>Télécommande</span></div>
+  </div></div>
+</section>
+<section id="camera" class="panel">
+  <div class="card">
+    <div class="row"><div><strong>Camera Link</strong><div class="sub">Flux léger de la 3DS</div></div><button class="secondary" onclick="openFullscreen()">⛶ Plein écran</button></div>
+    <div class="cameraBox"><img id="live" alt="Flux caméra"><span class="badge">LIVE</span></div>
+    <div id="cameraState" class="sub" style="margin-top:8px">En attente…</div>
+    <div class="toolbar"><button class="yellow" onclick="capture()">📷 Prendre une photo</button><button class="secondary" onclick="openLocal()">Portail 3DS</button></div>
+  </div>
+</section>
+<section id="settings" class="panel"><div class="card"><strong>Console associée</strong><div id="settingsData" class="code" style="margin-top:10px">Aucune</div><small>Les informations sont enregistrées uniquement sur cet iPhone.</small></div></section>
+</main>
+<nav><button id="nav-home" class="active" onclick="show('home')">Accueil</button><button id="nav-camera" onclick="show('camera')">Caméra</button><button id="nav-settings" onclick="show('settings')">Console</button></nav>
+<div id="fullscreen"><div class="fsTop"><strong>● LIVE • 3DS Link</strong><button class="secondary" onclick="closeFullscreen()">Fermer</button></div><img id="liveFs" alt="Flux caméra plein écran"><div class="fsControls"><button class="shutter" onclick="capture()"></button></div></div>
+<script>
+const KEY='3dsLinkPairV1';let pair=loadPair();let busy=false,timer=null,lastObjectUrl='';
+function parsePairFromHash(){const raw=location.hash.replace(/^#/,'');if(!raw)return null;const p=new URLSearchParams(raw);const host=p.get('h'),port=p.get('p')||'8080',pin=p.get('k');if(!host||!pin)return null;return {host,port,pin,pairedAt:Date.now()}}
+function loadPair(){try{return JSON.parse(localStorage.getItem(KEY)||'null')}catch{return null}}
+function savePair(p){pair=p;localStorage.setItem(KEY,JSON.stringify(p));history.replaceState(null,'',location.pathname);render()}
+function forget(){localStorage.removeItem(KEY);pair=null;render()}
+function base(){return pair?`http://${pair.host}:${pair.port}`:''}
+function headers(){return pair?{'X-3DS-Link-Pin':pair.pin}:{}}
+function render(){const ok=!!pair;document.getElementById('status').textContent=ok?'Nintendo 3DS associée':'Aucune 3DS associée';document.getElementById('dot').className='dot'+(ok?' ok':'');document.getElementById('pairInfo').textContent=ok?`${pair.host}:${pair.port} • PIN enregistré`:'Scanne le QR affiché par 3DS Link.';document.getElementById('settingsData').textContent=ok?`Hôte : ${pair.host}\nPort : ${pair.port}\nPIN : ••••\nAssociation : ${new Date(pair.pairedAt).toLocaleString()}`:'Aucune console associée'}
+function show(id){document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));document.getElementById(id).classList.add('active');document.getElementById('nav-'+id).classList.add('active');if(id==='camera')startCamera();else stopCamera()}
+async function connect(){if(!pair){alert('Scanne d’abord le QR de la 3DS.');return}try{const r=await fetch(base()+'/api/camera?t='+Date.now(),{headers:headers(),cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);document.getElementById('status').textContent='3DS connectée';document.getElementById('mixed').hidden=true;document.getElementById('lastSeen').textContent='Connexion directe disponible'}catch(e){document.getElementById('mixed').hidden=false;document.getElementById('lastSeen').textContent='Connexion directe bloquée ou console indisponible'}}
+function openLocal(){if(!pair){alert('Aucune 3DS associée.');return}location.href=base()+'/#pin='+encodeURIComponent(pair.pin)}
+async function frame(){if(busy||!pair)return;busy=true;try{const r=await fetch(base()+'/camera/live.bmp?t='+Date.now(),{headers:headers(),cache:'no-store'});if(!r.ok)throw new Error('Flux '+r.status);const blob=await r.blob();const u=URL.createObjectURL(blob);document.getElementById('live').src=u;document.getElementById('liveFs').src=u;if(lastObjectUrl)URL.revokeObjectURL(lastObjectUrl);lastObjectUrl=u;document.getElementById('cameraState').textContent='LIVE • liaison directe';document.getElementById('mixed').hidden=true}catch(e){document.getElementById('cameraState').textContent='Flux direct bloqué ou indisponible';document.getElementById('mixed').hidden=false}finally{busy=false}}
+function startCamera(){stopCamera();frame();timer=setInterval(frame,260)}function stopCamera(){if(timer)clearInterval(timer);timer=null}
+async function capture(){if(!pair)return;try{const r=await fetch(base()+'/api/camera/capture',{method:'POST',headers:headers(),cache:'no-store'});document.getElementById('cameraState').textContent=r.ok?'Déclenchement envoyé':'Capture refusée'}catch(e){document.getElementById('cameraState').textContent='Commande bloquée par Safari'}}
+function openFullscreen(){document.getElementById('fullscreen').classList.add('open');startCamera()}function closeFullscreen(){document.getElementById('fullscreen').classList.remove('open')}
+const fromQr=parsePairFromHash();if(fromQr)savePair(fromQr);else render();if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+</script>
+</body>
+</html>

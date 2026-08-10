@@ -1,0 +1,17 @@
+{
+  "name": "3DS Link",
+  "short_name": "3DS Link",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#e7ece8",
+  "theme_color": "#e9edea",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

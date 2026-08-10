@@ -31,7 +31,7 @@ constexpr int PORT = 8080;
 constexpr size_t MAX_HEADER = 16384;
 constexpr size_t IO_CHUNK = 16 * 1024;
 constexpr long long MAX_UPLOAD = 64LL * 1024LL * 1024LL;
-constexpr int QR_MAX_VERSION = 5;
+constexpr int QR_MAX_VERSION = 8;
 constexpr int QR_QUIET_ZONE = 4;
 
 constexpr const char* APP_DIR = "sdmc:/3ds/3DS-Link";
@@ -121,8 +121,15 @@ std::string connectionUrl() {
     return "http://" + localIp + ":" + std::to_string(PORT);
 }
 
+std::string pairingUrl() {
+    return "https://gagnonthe.github.io/3DS-Link/#h=" +
+           localIp +
+           "&p=" + std::to_string(PORT) +
+           "&k=" + std::to_string(pinCode);
+}
+
 void generateConnectionQr() {
-    const std::string url = connectionUrl();
+    const std::string url = pairingUrl();
     qrReady = qrcodegen_encodeText(
         url.c_str(),
         qrTemp,
@@ -1230,7 +1237,7 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
       <div class="appicon">3</div>
       <div><h1>3DS Link</h1><div class="small">3DS-style Companion • Local Link</div></div>
     </div>
-    <div class="small">v1.3</div>
+    <div class="small">v1.4</div>
   </div>
 </header>
 
@@ -1313,10 +1320,10 @@ button.secondary{background:linear-gradient(#fff,#e8eeeb);border:1px solid #b8c3
   <section id="info" class="panel">
     <h2>À propos</h2>
     <p class="muted">3DS Link fonctionne uniquement sur ton réseau local. Aucun serveur Internet n’est nécessaire pour le transfert.</p>
-    <p class="muted">La v1.3 ajoute le launcher tactile, restaure le QR et améliore l’interface 3DS Link.</p>
+    <p class="muted">La v1.4 ajoute le launcher tactile, restaure le QR et améliore l’interface 3DS Link.</p>
   </section>
 
-  <footer>3DS Link v1.3 • réseau local • garde l’application ouverte sur la 3DS</footer>
+  <footer>3DS Link v1.4 • réseau local • garde l’application ouverte sur la 3DS</footer>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -2209,7 +2216,7 @@ void drawHomeTopScreen() {
     C2D_DrawCircleSolid(286, 12, 0.5f, 4, serverReady ? COLOR_GREEN : COLOR_RED);
     drawText(serverReady ? "Connecte" : "Hors ligne", 296, 5, 0.29f,
              serverReady ? COLOR_GREEN : COLOR_RED);
-    drawText("v1.3", 359, 5, 0.29f, COLOR_MUTED);
+    drawText("v1.4", 359, 5, 0.29f, COLOR_MUTED);
 
     // Carte principale
     drawRoundedRect(17, 39, 366, 146, 15, C2D_Color32(203, 210, 206, 100), 0.15f);
@@ -2233,7 +2240,7 @@ void drawHomeTopScreen() {
         // QR toujours visible : suffisamment grand pour Safari, sans masquer le launcher.
         drawRoundedRect(278, 49, 91, 116, 10, C2D_Color32(235, 238, 235, 255), 0.31f);
         drawRoundedRect(275, 46, 91, 116, 10, COLOR_WHITE, 0.34f);
-        drawCenteredText("SCAN", 320, 51, 0.25f, COLOR_MUTED);
+        drawCenteredText("PAIR", 320, 51, 0.25f, COLOR_MUTED);
         drawConnectionQr(320, 108, 78.0f);
     } else {
         drawText("A pour relancer le serveur", 136, 120, 0.29f, COLOR_RED);
@@ -2303,7 +2310,7 @@ void drawCameraTopScreen() {
     C2D_SceneBegin(topTarget);
 
     drawCenteredText("Demarrage de la camera...", 200, 103, 0.50f, COLOR_WHITE);
-    drawCenteredText("3DS Link v1.3", 200, 132, 0.34f, COLOR_MUTED);
+    drawCenteredText("3DS Link v1.4", 200, 132, 0.34f, COLOR_MUTED);
 }
 
 void drawCameraBottomScreen() {
